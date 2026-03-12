@@ -113,6 +113,8 @@ def run(
     if citation_format is not None:
         kwargs["citation_format"] = citation_format
 
+    from tavily_cli.theme import err_console, spinner
+
     if stream:
         kwargs["stream"] = True
         try:
@@ -127,7 +129,8 @@ def run(
         return
 
     try:
-        result = client.research(**kwargs)
+        with spinner("Starting research...", json_mode=json_mode):
+            result = client.research(**kwargs)
     except Exception as e:
         handle_api_error(e, json_mode)
 
@@ -137,35 +140,39 @@ def run(
         emit({"request_id": request_id, "status": result.get("status", "pending")}, json_mode=True, output_file=output_file)
         return
 
-    from rich.console import Console
-    err_console = Console(stderr=True)
-
-    if not json_mode:
-        err_console.print(f"Research started (id: {request_id}). Polling every {poll_interval}s...")
-
     elapsed = 0
     response = result
-    while elapsed < timeout:
-        try:
-            response = client.get_research(request_id)
-        except Exception as e:
-            handle_api_error(e, json_mode)
-
-        status = response.get("status", "unknown")
-        if status in ("completed", "failed"):
-            break
-
-        if not json_mode:
-            err_console.print(f"  Status: {status}... ({elapsed}s elapsed)")
-
-        time.sleep(poll_interval)
-        elapsed += poll_interval
-    else:
-        if not json_mode:
-            err_console.print(f"[yellow]Timed out after {timeout}s. Use 'tavily research poll {request_id}' to continue.[/yellow]")
-        if json_mode:
+    if json_mode:
+        # JSON mode: poll silently
+        while elapsed < timeout:
+            try:
+                response = client.get_research(request_id)
+            except Exception as e:
+                handle_api_error(e, json_mode)
+            if response.get("status") in ("completed", "failed"):
+                break
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+        else:
             emit({"request_id": request_id, "status": "timeout"}, json_mode=True, output_file=output_file)
-        return
+            return
+    else:
+        # Rich mode: live spinner with elapsed time
+        with err_console.status("", spinner="dots") as live:
+            while elapsed < timeout:
+                live.update(f"[bright_cyan]Researching... {elapsed}s elapsed[/bright_cyan]")
+                try:
+                    response = client.get_research(request_id)
+                except Exception as e:
+                    handle_api_error(e, json_mode)
+                status = response.get("status", "unknown")
+                if status in ("completed", "failed"):
+                    break
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+            else:
+                err_console.print(f"[yellow]Timed out after {timeout}s. Resume with: tavily research poll {request_id}[/yellow]")
+                return
 
     print_research_result(response, json_mode=json_mode, output_file=output_file)
 
@@ -190,15 +197,15 @@ def status(ctx: click.Context, request_id: str, json_flag: bool) -> None:
     if json_mode:
         emit(response, json_mode=True)
     else:
-        from rich.console import Console
-        console = Console()
+        from tavily_cli.theme import console
         s = response.get("status", "unknown")
-        console.print(f"[bold]Request:[/bold] {request_id}")
-        console.print(f"[bold]Status:[/bold]  {s}")
+        status_style = {"completed": "green", "failed": "red"}.get(s, "yellow")
+        console.print(f"  [bold]Request:[/bold]  {request_id}")
+        console.print(f"  [bold]Status:[/bold]   [{status_style}]{s}[/{status_style}]")
         if s == "completed":
-            console.print(f"[green]Research complete.[/green] Run 'tavily research poll {request_id}' to view results.")
+            console.print(f"  [dim]Run 'tavily research poll {request_id}' to view results.[/dim]")
         elif s == "failed":
-            console.print(f"[red]Failed:[/red] {response.get('error', 'Unknown error')}")
+            console.print(f"  [red]Error:[/red] {response.get('error', 'Unknown error')}")
 
 
 @research.command()
@@ -212,38 +219,40 @@ def poll(ctx: click.Context, request_id: str, poll_interval: int, timeout: int, 
     """Poll a research task until completion and return results."""
     from tavily_cli.config import get_client
     from tavily_cli.output import emit, print_research_result
+    from tavily_cli.theme import err_console
 
     json_mode = _resolve_json(ctx, json_flag)
     client = get_client()
 
-    from rich.console import Console
-    err_console = Console(stderr=True)
-
-    if not json_mode:
-        err_console.print(f"Polling research task {request_id}...")
-
     elapsed = 0
     response = {}
-    while elapsed < timeout:
-        try:
-            response = client.get_research(request_id)
-        except Exception as e:
-            handle_api_error(e, json_mode)
-
-        status_val = response.get("status", "unknown")
-        if status_val in ("completed", "failed"):
-            break
-
-        if not json_mode:
-            err_console.print(f"  Status: {status_val}... ({elapsed}s elapsed)")
-
-        time.sleep(poll_interval)
-        elapsed += poll_interval
-    else:
-        if json_mode:
-            emit({"request_id": request_id, "status": "timeout"}, json_mode=True, output_file=output_file)
+    if json_mode:
+        while elapsed < timeout:
+            try:
+                response = client.get_research(request_id)
+            except Exception as e:
+                handle_api_error(e, json_mode)
+            if response.get("status") in ("completed", "failed"):
+                break
+            time.sleep(poll_interval)
+            elapsed += poll_interval
         else:
-            err_console.print(f"[yellow]Timed out after {timeout}s.[/yellow]")
-        return
+            emit({"request_id": request_id, "status": "timeout"}, json_mode=True, output_file=output_file)
+            return
+    else:
+        with err_console.status("", spinner="dots") as live:
+            while elapsed < timeout:
+                live.update(f"[bright_cyan]Polling research {request_id[:8]}... {elapsed}s elapsed[/bright_cyan]")
+                try:
+                    response = client.get_research(request_id)
+                except Exception as e:
+                    handle_api_error(e, json_mode)
+                if response.get("status") in ("completed", "failed"):
+                    break
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+            else:
+                err_console.print(f"[yellow]Timed out after {timeout}s.[/yellow]")
+                return
 
     print_research_result(response, json_mode=json_mode, output_file=output_file)

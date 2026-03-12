@@ -26,6 +26,6 @@ def handle_api_error(e: Exception, json_mode: bool) -> None:
     if json_mode:
         click.echo(json.dumps({"error": str(e)}))
     else:
-        from rich.console import Console
-        Console(stderr=True).print(f"[red]API error:[/red] {e}")
+        from tavily_cli.theme import err_console
+        err_console.print(f"  [red]> Error:[/red] {e}")
     raise SystemExit(4)

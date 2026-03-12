@@ -90,8 +90,11 @@ def search(
     if chunks_per_source is not None:
         kwargs["chunks_per_source"] = chunks_per_source
 
+    from tavily_cli.theme import spinner
+
     try:
-        response = client.search(**kwargs)
+        with spinner("Searching...", json_mode=json_output):
+            response = client.search(**kwargs)
     except Exception as e:
         handle_api_error(e, json_output)
 

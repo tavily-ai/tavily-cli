@@ -55,8 +55,11 @@ def extract(
     if timeout is not None:
         kwargs["timeout"] = timeout
 
+    from tavily_cli.theme import spinner
+
     try:
-        response = client.extract(**kwargs)
+        with spinner(f"Extracting {len(url_list)} URL{'s' if len(url_list) > 1 else ''}...", json_mode=json_output):
+            response = client.extract(**kwargs)
     except Exception as e:
         handle_api_error(e, json_output)
 
