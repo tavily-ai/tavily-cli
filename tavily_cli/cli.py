@@ -1,4 +1,4 @@
-"""Main CLI entry point — wires all commands into the `tavily` group."""
+"""Main CLI entry point — wires all commands into the `tvly` group."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from tavily_cli.commands.search import search
 def cli(ctx: click.Context, version: bool, show_status: bool, json_output: bool) -> None:
     """Tavily CLI — search, extract, crawl, map, and research from the command line.
 
-    Authenticate with: tavily login --api-key tvly-YOUR_KEY
+    Authenticate with: tvly login --api-key tvly-YOUR_KEY
     Or set TAVILY_API_KEY environment variable.
     """
     ctx.ensure_object(dict)
@@ -48,10 +48,9 @@ def cli(ctx: click.Context, version: bool, show_status: bool, json_output: bool)
 def _print_welcome() -> None:
     """Show a branded welcome screen with quick-start hints."""
     from rich.console import Console
-    from rich.panel import Panel
     from rich.text import Text
 
-    from tavily_cli.config import get_api_key, is_oauth_token
+    from tavily_cli.config import get_api_key
     from tavily_cli.theme import LOGO
 
     console = Console(stderr=True)
@@ -68,28 +67,28 @@ def _print_welcome() -> None:
         console.print(f"  [green]>[/green] Authenticated via {source}")
     else:
         console.print(f"  [red]>[/red] Not authenticated")
-        console.print(f"    [dim]Run:[/dim] tavily login")
+        console.print(f"    [dim]Run:[/dim] tvly login")
 
     console.print()
 
     # Quick-start commands
     commands = Text()
     commands.append("  Commands\n\n", style="bold")
-    commands.append("    tavily search ", style="bright_cyan")
+    commands.append("    tvly search ", style="bright_cyan")
     commands.append('"your query"', style="dim")
-    commands.append("          Web search\n")
-    commands.append("    tavily extract ", style="bright_cyan")
+    commands.append("            Web search\n")
+    commands.append("    tvly extract ", style="bright_cyan")
     commands.append("<url>", style="dim")
-    commands.append("                Extract content\n")
-    commands.append("    tavily crawl ", style="bright_cyan")
+    commands.append("                  Extract content\n")
+    commands.append("    tvly crawl ", style="bright_cyan")
     commands.append("<url>", style="dim")
-    commands.append("                  Crawl a website\n")
-    commands.append("    tavily map ", style="bright_cyan")
+    commands.append("                    Crawl a website\n")
+    commands.append("    tvly map ", style="bright_cyan")
     commands.append("<url>", style="dim")
-    commands.append("                    Discover URLs\n")
-    commands.append("    tavily research ", style="bright_cyan")
+    commands.append("                      Discover URLs\n")
+    commands.append("    tvly research ", style="bright_cyan")
     commands.append('"your query"', style="dim")
-    commands.append("        Deep research\n")
+    commands.append("          Deep research\n")
 
     console.print(commands)
     console.print("  [dim]Add --json to any command for machine-readable output.[/dim]")
@@ -105,7 +104,7 @@ def _auth_source(key: str) -> str:
     if os.environ.get("TAVILY_API_KEY"):
         return "TAVILY_API_KEY"
     if is_oauth_token(key):
-        return "OAuth (tavily login)"
+        return "OAuth (tvly login)"
     return "API key"
 
 
@@ -133,7 +132,7 @@ def _print_status(json_output: bool) -> None:
             console.print(f"  [green]>[/green] Authenticated via {source}")
         else:
             console.print("  [red]>[/red] Not authenticated")
-            console.print("    Run: tavily login")
+            console.print("    Run: tvly login")
 
 
 cli.add_command(login)

@@ -1,4 +1,4 @@
-"""tavily research — deep research via the Tavily API (async: run/status/poll)."""
+"""tvly research — deep research via the Tavily API (async: run/status/poll)."""
 
 from __future__ import annotations
 
@@ -26,13 +26,13 @@ class ResearchGroup(click.Group):
             elif first in self._SUBCOMMANDS_WITH_REQUIRED_ARG:
                 # 'status' and 'poll' require a request_id as the next arg.
                 # If there's no next positional arg, the user likely meant it
-                # as a research query (e.g., "tavily research status").
+                # as a research query (e.g., "tvly research status").
                 # But always allow --help to pass through to the subcommand.
                 has_positional = len(args) > 1 and not args[1].startswith("-")
                 has_help = "--help" in args or "-h" in args
                 if not has_positional and not has_help:
                     args = ["run"] + args
-            # 'run' is always treated as the subcommand (use "tavily research run run" to research the word "run").
+            # 'run' is always treated as the subcommand (use "tvly research run run" to research the word "run").
         return super().parse_args(ctx, args)
 
 
@@ -40,8 +40,8 @@ class ResearchGroup(click.Group):
 def research() -> None:
     """Deep research commands (run, status, poll).
 
-    You can run research directly: tavily research "your query"
-    Or use subcommands: tavily research status <id>
+    You can run research directly: tvly research "your query"
+    Or use subcommands: tvly research status <id>
     """
     pass
 
@@ -86,7 +86,7 @@ def run(
 
     QUERY is the research topic. Use "-" to read from stdin.
 
-    You can also run directly: tavily research "your query"
+    You can also run directly: tvly research "your query"
     """
     from tavily_cli.config import get_client
     from tavily_cli.output import emit, print_research_result
@@ -171,7 +171,7 @@ def run(
                 time.sleep(poll_interval)
                 elapsed += poll_interval
             else:
-                err_console.print(f"[yellow]Timed out after {timeout}s. Resume with: tavily research poll {request_id}[/yellow]")
+                err_console.print(f"[yellow]Timed out after {timeout}s. Resume with: tvly research poll {request_id}[/yellow]")
                 return
 
     print_research_result(response, json_mode=json_mode, output_file=output_file)
@@ -203,7 +203,7 @@ def status(ctx: click.Context, request_id: str, json_flag: bool) -> None:
         console.print(f"  [bold]Request:[/bold]  {request_id}")
         console.print(f"  [bold]Status:[/bold]   [{status_style}]{s}[/{status_style}]")
         if s == "completed":
-            console.print(f"  [dim]Run 'tavily research poll {request_id}' to view results.[/dim]")
+            console.print(f"  [dim]Run 'tvly research poll {request_id}' to view results.[/dim]")
         elif s == "failed":
             console.print(f"  [red]Error:[/red] {response.get('error', 'Unknown error')}")
 
