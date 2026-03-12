@@ -57,6 +57,67 @@ def _resolve_json(ctx: click.Context, local_flag: bool) -> bool:
     return False
 
 
+def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
+    """Parse SSE stream chunks, show live status, then render with Rich like non-stream."""
+    from tavily_cli.output import print_research_result
+    from tavily_cli.theme import err_console
+
+    content_parts: list[str] = []
+    sources: list[dict] = []
+    current_step: str | None = None
+
+    for raw_chunk in stream_resp:
+        text = raw_chunk.decode("utf-8") if isinstance(raw_chunk, bytes) else raw_chunk
+
+        for line in text.splitlines():
+            if not line.startswith("data:"):
+                continue
+            try:
+                data = json.loads(line[5:])
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+            delta = (data.get("choices") or [{}])[0].get("delta", {})
+
+            # --- Tool calls: show live status updates ---
+            tool_calls = delta.get("tool_calls", {})
+            if tool_calls.get("type") == "tool_call":
+                for tc in tool_calls.get("tool_call", []):
+                    name = tc.get("name", "")
+                    args = tc.get("arguments", "")
+                    step = f"{name}: {args}" if args else name
+                    if step != current_step:
+                        current_step = step
+                        err_console.print(f"  [dim]{step}[/dim]")
+
+            if tool_calls.get("type") == "tool_response":
+                for tr in tool_calls.get("tool_response", []):
+                    name = tr.get("name", "")
+                    if name == "WebSearch":
+                        src_count = len(tr.get("sources", []))
+                        if src_count:
+                            err_console.print(f"  [dim]Found {src_count} sources[/dim]")
+
+            # --- Content: collect the report text ---
+            content = delta.get("content")
+            if content:
+                content_parts.append(content)
+
+            # --- Sources: collect final source list ---
+            src_list = delta.get("sources")
+            if src_list:
+                sources = src_list
+
+    # Render using the same formatter as non-stream output.
+    full_content = "".join(content_parts)
+    result = {
+        "status": "completed",
+        "content": full_content,
+        "sources": sources,
+    }
+    print_research_result(result, json_mode=False, output_file=output_file)
+
+
 @research.command()
 @click.argument("query", required=False)
 @click.option("--model", type=click.Choice(["mini", "pro", "auto"]), default=None, help="Research model (default: auto).")
@@ -119,11 +180,13 @@ def run(
         kwargs["stream"] = True
         try:
             stream_resp = client.research(**kwargs)
-            for chunk in stream_resp:
-                if isinstance(chunk, bytes):
-                    click.echo(chunk.decode("utf-8"), nl=False)
-                else:
-                    click.echo(chunk, nl=False)
+            if json_mode:
+                # JSON mode: dump raw SSE as-is.
+                for chunk in stream_resp:
+                    text = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+                    click.echo(text, nl=False)
+            else:
+                _render_stream(stream_resp, output_file=output_file)
         except Exception as e:
             handle_api_error(e, json_mode)
         return
@@ -166,21 +229,23 @@ def run(
             emit({"request_id": request_id, "status": "timeout"}, json_mode=True, output_file=output_file)
             return
     else:
-        # Rich mode: live spinner with elapsed time
+        # Rich mode: live spinner with running elapsed time
         with err_console.status("", spinner="dots") as live:
+            next_poll = 0
             while elapsed < timeout:
-                live.update(f"[bright_cyan]Researching... {elapsed}s elapsed[/bright_cyan]")
-                try:
-                    response = client.get_research(request_id)
-                except Exception as e:
-                    handle_api_error(e, json_mode)
-                status = response.get("status", "unknown")
-                if status in ("completed", "failed"):
-                    break
-                time.sleep(poll_interval)
-                elapsed += poll_interval
+                live.update(f"[#5CD9E6]Researching... {elapsed}s elapsed[/#5CD9E6]")
+                if elapsed >= next_poll:
+                    try:
+                        response = client.get_research(request_id)
+                    except Exception as e:
+                        handle_api_error(e, json_mode)
+                    if response.get("status", "unknown") in ("completed", "failed"):
+                        break
+                    next_poll = elapsed + poll_interval
+                time.sleep(1)
+                elapsed += 1
             else:
-                err_console.print(f"[yellow]Timed out after {timeout}s. Resume with: tvly research poll {request_id}[/yellow]")
+                err_console.print(f"[#FFC769]Timed out after {timeout}s. Resume with: tvly research poll {request_id}[/#FFC769]")
                 return
 
     print_research_result(response, json_mode=json_mode, output_file=output_file)
@@ -208,13 +273,13 @@ def status(ctx: click.Context, request_id: str, json_flag: bool) -> None:
     else:
         from tavily_cli.theme import console
         s = response.get("status", "unknown")
-        status_style = {"completed": "green", "failed": "red"}.get(s, "yellow")
+        status_style = {"completed": "#9BC0AE", "failed": "#FAA2FB"}.get(s, "#FFC769")
         console.print(f"  [bold]Request:[/bold]  {request_id}")
         console.print(f"  [bold]Status:[/bold]   [{status_style}]{s}[/{status_style}]")
         if s == "completed":
             console.print(f"  [dim]Run 'tvly research poll {request_id}' to view results.[/dim]")
         elif s == "failed":
-            console.print(f"  [red]Error:[/red] {response.get('error', 'Unknown error')}")
+            console.print(f"  [#FAA2FB]Error:[/#FAA2FB] {response.get('error', 'Unknown error')}")
 
 
 @research.command()
@@ -250,18 +315,21 @@ def poll(ctx: click.Context, request_id: str, poll_interval: int, timeout: int, 
             return
     else:
         with err_console.status("", spinner="dots") as live:
+            next_poll = 0
             while elapsed < timeout:
-                live.update(f"[bright_cyan]Polling research {request_id[:8]}... {elapsed}s elapsed[/bright_cyan]")
-                try:
-                    response = client.get_research(request_id)
-                except Exception as e:
-                    handle_api_error(e, json_mode)
-                if response.get("status") in ("completed", "failed"):
-                    break
-                time.sleep(poll_interval)
-                elapsed += poll_interval
+                live.update(f"[#5CD9E6]Polling research {request_id[:8]}... {elapsed}s elapsed[/#5CD9E6]")
+                if elapsed >= next_poll:
+                    try:
+                        response = client.get_research(request_id)
+                    except Exception as e:
+                        handle_api_error(e, json_mode)
+                    if response.get("status") in ("completed", "failed"):
+                        break
+                    next_poll = elapsed + poll_interval
+                time.sleep(1)
+                elapsed += 1
             else:
-                err_console.print(f"[yellow]Timed out after {timeout}s.[/yellow]")
+                err_console.print(f"[#FFC769]Timed out after {timeout}s.[/#FFC769]")
                 return
 
     print_research_result(response, json_mode=json_mode, output_file=output_file)

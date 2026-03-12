@@ -50,7 +50,7 @@ def login(api_key: str | None) -> None:
     _clear_stale_mcp_state()
 
     token = None
-    with err_console.status("[bright_cyan]Waiting for browser authentication...[/bright_cyan]", spinner="dots") as live:
+    with err_console.status("[#5CD9E6]Waiting for browser authentication...[/#5CD9E6]", spinner="dots") as live:
         proc = subprocess.Popen(
             ["npx", "-y", "mcp-remote", "https://mcp.tavily.com/mcp"],
             stdin=subprocess.DEVNULL,
@@ -64,7 +64,7 @@ def login(api_key: str | None) -> None:
             while elapsed < timeout:
                 time.sleep(3)
                 elapsed += 3
-                live.update(f"[bright_cyan]Waiting for browser authentication... {elapsed}s[/bright_cyan]")
+                live.update(f"[#5CD9E6]Waiting for browser authentication... {elapsed}s[/#5CD9E6]")
                 token = _get_mcp_token()
                 if token:
                     break
@@ -79,11 +79,11 @@ def login(api_key: str | None) -> None:
         _print_login_success("OAuth", "Token stored in ~/.mcp-auth/")
     else:
         err_console.print()
-        err_console.print("  [red]> Authentication timed out.[/red]")
+        err_console.print("  [#FAA2FB]> Authentication timed out.[/#FAA2FB]")
         err_console.print()
         err_console.print("  If you don't have an account, sign up at [link=https://tavily.com]tavily.com[/link]")
         err_console.print("  Or use an API key:")
-        err_console.print("    [bright_cyan]tvly login --api-key tvly-YOUR_KEY[/bright_cyan]")
+        err_console.print("    [#9BC0AE]tvly login --api-key tvly-YOUR_KEY[/#9BC0AE]")
         err_console.print()
         raise SystemExit(3)
 
@@ -94,27 +94,28 @@ def _print_login_success(method: str, detail: str) -> None:
 
     from tavily_cli.theme import LOGO, console
 
+    console.print()
     console.print(LOGO)
     console.print()
-    console.print(f"  [green]> Authenticated via {method}[/green]")
+    console.print(f"  [#9BC0AE]> Authenticated via {method}[/#9BC0AE]")
     console.print(f"    [dim]{detail}[/dim]")
     console.print()
 
     hints = Text()
     hints.append("  Get started\n\n", style="bold")
-    hints.append("    tvly search ", style="bright_cyan")
+    hints.append("    tvly search ", style="#9BC0AE")
     hints.append('"your first query"', style="dim")
     hints.append("\n")
-    hints.append("    tvly extract ", style="bright_cyan")
+    hints.append("    tvly extract ", style="#9BC0AE")
     hints.append("<url>", style="dim")
     hints.append("\n")
-    hints.append("    tvly crawl ", style="bright_cyan")
+    hints.append("    tvly crawl ", style="#9BC0AE")
     hints.append("<url>", style="dim")
     hints.append("\n")
-    hints.append("    tvly map ", style="bright_cyan")
+    hints.append("    tvly map ", style="#9BC0AE")
     hints.append("<url>", style="dim")
     hints.append("\n")
-    hints.append("    tvly research ", style="bright_cyan")
+    hints.append("    tvly research ", style="#9BC0AE")
     hints.append('"deep dive topic"', style="dim")
     hints.append("\n")
     console.print(hints)
@@ -127,7 +128,7 @@ def logout() -> None:
 
     clear_credentials()
     err_console.print("  [dim]Credentials cleared.[/dim]")
-    err_console.print("  Run [bright_cyan]tvly login[/bright_cyan] to authenticate again.")
+    err_console.print("  Run [#9BC0AE]tvly login[/#9BC0AE] to authenticate again.")
 
 
 @click.command("auth")
@@ -164,10 +165,10 @@ def auth_status(ctx: click.Context, json_flag: bool) -> None:
         console.print()
         if key:
             masked = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
-            console.print(f"  [green]>[/green] Authenticated via {source}")
+            console.print(f"  [#9BC0AE]>[/#9BC0AE] Authenticated via {source}")
             console.print(f"    [dim]Key: {masked}[/dim]")
         else:
-            console.print(f"  [red]>[/red] Not authenticated")
+            console.print(f"  [#FAA2FB]>[/#FAA2FB] Not authenticated")
             console.print()
-            console.print("  Run [bright_cyan]tvly login[/bright_cyan] to authenticate.")
+            console.print("  Run [#9BC0AE]tvly login[/#9BC0AE] to authenticate.")
         console.print()

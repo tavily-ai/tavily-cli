@@ -44,13 +44,13 @@ def handle_api_error(e: Exception, json_mode: bool) -> None:
 
     if isinstance(e, TavilyAPIError) and e.status in _LIMIT_STATUSES:
         err_console.print()
-        err_console.print(f"  [yellow]>[/yellow] {e}")
+        err_console.print(f"  [#FFC769]>[/#FFC769] {e}")
         err_console.print()
-        err_console.print("  [dim]Upgrade your plan at[/dim] [bright_cyan link=https://tavily.com]tavily.com[/bright_cyan link]")
+        err_console.print("  [dim]Upgrade your plan at[/dim] [#9BC0AE link=https://tavily.com]tavily.com[/#9BC0AE link]")
         if e.docs:
             err_console.print(f"  [dim]Docs:[/dim] [dim link={e.docs}]{e.docs}[/dim link]")
         err_console.print()
         raise SystemExit(3)
 
-    err_console.print(f"  [red]> Error:[/red] {e}")
+    err_console.print(f"  [#FAA2FB]> Error:[/#FAA2FB] {e}")
     raise SystemExit(4)

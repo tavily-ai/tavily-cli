@@ -113,11 +113,11 @@ def get_api_key_or_exit() -> str:
     if not key:
         from rich.console import Console
         console = Console(stderr=True)
-        console.print("  [red]> Error:[/red] No Tavily API key found.")
+        console.print("  [#FAA2FB]> Error:[/#FAA2FB] No Tavily API key found.")
         console.print()
         console.print("  Authenticate using one of:")
-        console.print("    [bright_cyan]tvly login[/bright_cyan]")
-        console.print("    [bright_cyan]tvly login --api-key tvly-YOUR_KEY[/bright_cyan]")
+        console.print("    [#9BC0AE]tvly login[/#9BC0AE]")
+        console.print("    [#9BC0AE]tvly login --api-key tvly-YOUR_KEY[/#9BC0AE]")
         console.print("    [dim]export TAVILY_API_KEY=tvly-YOUR_KEY[/dim]")
         console.print()
         console.print("  Get a key at [link=https://tavily.com]tavily.com[/link]")

@@ -8,26 +8,32 @@ from typing import Generator
 from rich.console import Console
 from rich.status import Status
 
-# Brand colors
-BRAND = "bright_cyan"
-ACCENT = "blue"
-SUCCESS = "green"
-WARN = "yellow"
-ERROR = "red"
+# Brand colors — from tavily.com
+AQUA = "#5CD9E6"
+PINK = "#FAA2FB"
+YELLOW = "#FFC769"
+PURPLE = "#8385F9"
+GREEN = "#9BC0AE"
+
+BRAND = GREEN       # primary brand accent
+ACCENT = AQUA       # secondary accent (headings, highlights)
+SUCCESS = GREEN
+WARN = YELLOW
+ERROR = PINK
 DIM = "dim"
 
 console = Console()
 err_console = Console(stderr=True)
 
 LOGO = """\
-[bright_cyan]   _              _ _       [/bright_cyan]
-[bright_cyan]  | |_ __ ___   _(_) |_   _ [/bright_cyan]
-[bright_cyan]  | __/ _` \\ \\ / / | | | | |[/bright_cyan]
-[bright_cyan]  | || (_| |\\ V /| | | |_| |[/bright_cyan]
-[bright_cyan]   \\__\\__,_| \\_/ |_|_|\\__, |[/bright_cyan]
-[bright_cyan]                       |___/ [/bright_cyan]"""
+[#5CD9E6]   _              _ _       [/#5CD9E6]
+[#FAA2FB]  | |_ __ ___   _(_) |_   _ [/#FAA2FB]
+[#FFC769]  | __/ _` \\ \\ / / | | | | |[/#FFC769]
+[#8385F9]  | || (_| |\\ V /| | | |_| |[/#8385F9]
+[#9BC0AE]   \\__\\__,_| \\_/ |_|_|\\__, |[/#9BC0AE]
+[dim]                       |___/ [/dim]"""
 
-LOGO_COMPACT = "[bright_cyan bold]tavily[/bright_cyan bold]"
+LOGO_COMPACT = "[#9BC0AE bold]tavily[/#9BC0AE bold]"
 
 
 @contextmanager

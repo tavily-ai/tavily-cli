@@ -84,7 +84,10 @@ def print_search_results(data: dict, *, json_mode: bool, output_file: str | None
     response_time = data.get("response_time")
 
     if answer:
-        console.print(Panel(Markdown(answer), title="Answer", border_style="green", padding=(1, 2)))
+        console.print()
+        console.print(f"  [#5CD9E6 bold]Answer[/#5CD9E6 bold]")
+        console.print()
+        console.print(Markdown(answer), width=min(console.width, 100))
         console.print()
 
     if not results:
@@ -98,12 +101,12 @@ def print_search_results(data: dict, *, json_mode: bool, output_file: str | None
         score = r.get("score")
 
         header = Text()
-        header.append(f"{i}. ", style="bold cyan")
+        header.append(f"{i}. ", style="bold #8385F9")
         header.append(title, style="bold")
         header.append("  ")
         header.append_text(_score_label(score))
         console.print(header)
-        console.print(f"   [link={url}]{_domain(url)}[/link]", style="blue")
+        console.print(f"   [link={url}]{_domain(url)}[/link]", style="#FAA2FB")
         if content:
             snippet = content[:300]
             if len(content) > 300:
@@ -140,15 +143,21 @@ def print_extract_results(data: dict, *, json_mode: bool, output_file: str | Non
         url = r.get("url", "")
         raw = r.get("raw_content", "")
         char_count = len(raw) if raw else 0
-        subtitle = f"{_domain(url)} ({char_count:,} chars)"
-        content = Markdown(raw[:3000]) if raw else Text("[dim]No content[/dim]")
-        console.print(Panel(content, title=url, subtitle=subtitle, border_style="green", padding=(1, 2)))
+
+        console.print()
+        console.print(f"  [#5CD9E6 bold]{url}[/#5CD9E6 bold]")
+        console.print(f"  [dim]{_domain(url)} ({char_count:,} chars)[/dim]")
+        console.print()
+        if raw:
+            console.print(Markdown(raw[:3000]), width=min(console.width, 100))
+        else:
+            console.print("  [dim]No content[/dim]")
         console.print()
 
     if failed:
-        console.print("[yellow]Failed extractions:[/yellow]")
+        console.print("[#FFC769]Failed extractions:[/#FFC769]")
         for f_item in failed:
-            console.print(f"  [red]x[/red] {f_item.get('url')}: {f_item.get('error')}")
+            console.print(f"  [#FAA2FB]x[/#FAA2FB] {f_item.get('url')}: {f_item.get('error')}")
 
     response_time = data.get("response_time")
     _footer("Extract", len(results), f"extracted, {len(failed)} failed", response_time)
@@ -192,7 +201,7 @@ def print_crawl_results(
             path = url
 
         label = Text()
-        label.append(path, style="cyan")
+        label.append(path, style="#5CD9E6")
         label.append(f"  ({char_count:,} chars)", style="dim")
 
         node = tree.add(label)
@@ -271,20 +280,23 @@ def print_research_result(data: dict, *, json_mode: bool, output_file: str | Non
     if status != "completed":
         console.print(f"[bold]Status:[/bold] {status}")
         if data.get("error"):
-            console.print(f"[red]Error:[/red] {data['error']}")
+            console.print(f"[#FAA2FB]Error:[/#FAA2FB] {data['error']}")
         return
 
     # Render the research report as markdown
     if content:
-        console.print(Panel(Markdown(content), title="Research Report", border_style="green", padding=(1, 2)))
+        console.print()
+        console.print(f"  [#5CD9E6 bold]Research Report[/#5CD9E6 bold]")
+        console.print()
+        console.print(Markdown(content), width=min(console.width, 100))
 
     # Sources as a numbered table
     if sources:
         console.print()
         table = Table(title=f"Sources ({len(sources)})", show_lines=False, padding=(0, 1))
-        table.add_column("#", style="bold cyan", width=4)
+        table.add_column("#", style="bold #8385F9", width=4)
         table.add_column("Title", style="bold", ratio=2)
-        table.add_column("URL", style="dim", ratio=3)
+        table.add_column("URL", style="#FAA2FB", ratio=3)
 
         for i, s in enumerate(sources, 1):
             title = s.get("title", "")

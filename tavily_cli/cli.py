@@ -42,7 +42,9 @@ def cli(ctx: click.Context, version: bool, show_status: bool, json_output: bool)
         return
 
     if ctx.invoked_subcommand is None:
-        _print_welcome()
+        from tavily_cli.repl import run_repl
+        run_repl()
+        ctx.exit(0)
 
 
 def _print_welcome() -> None:
@@ -57,6 +59,7 @@ def _print_welcome() -> None:
     key = get_api_key()
 
     # Logo + version
+    console.print()
     console.print(LOGO)
     console.print(f"  [dim]v{__version__}[/dim]")
     console.print()
@@ -64,9 +67,9 @@ def _print_welcome() -> None:
     # Auth status
     if key:
         source = _auth_source(key)
-        console.print(f"  [green]>[/green] Authenticated via {source}")
+        console.print(f"  [#9BC0AE]>[/#9BC0AE] Authenticated via {source}")
     else:
-        console.print(f"  [red]>[/red] Not authenticated")
+        console.print(f"  [#FAA2FB]>[/#FAA2FB] Not authenticated")
         console.print(f"    [dim]Run:[/dim] tvly login")
 
     console.print()
@@ -74,19 +77,19 @@ def _print_welcome() -> None:
     # Quick-start commands
     commands = Text()
     commands.append("  Commands\n\n", style="bold")
-    commands.append("    tvly search ", style="bright_cyan")
+    commands.append("    tvly search ", style="#9BC0AE")
     commands.append('"your query"', style="dim")
     commands.append("            Web search\n")
-    commands.append("    tvly extract ", style="bright_cyan")
+    commands.append("    tvly extract ", style="#9BC0AE")
     commands.append("<url>", style="dim")
     commands.append("                  Extract content\n")
-    commands.append("    tvly crawl ", style="bright_cyan")
+    commands.append("    tvly crawl ", style="#9BC0AE")
     commands.append("<url>", style="dim")
     commands.append("                    Crawl a website\n")
-    commands.append("    tvly map ", style="bright_cyan")
+    commands.append("    tvly map ", style="#9BC0AE")
     commands.append("<url>", style="dim")
     commands.append("                      Discover URLs\n")
-    commands.append("    tvly research ", style="bright_cyan")
+    commands.append("    tvly research ", style="#9BC0AE")
     commands.append('"your query"', style="dim")
     commands.append("          Deep research\n")
 
@@ -125,13 +128,13 @@ def _print_status(json_output: bool) -> None:
     else:
         from rich.console import Console
         console = Console()
-        console.print(f"  [bold bright_cyan]tavily[/bold bright_cyan] v{__version__}")
+        console.print(f"  [bold #9BC0AE]tavily[/bold #9BC0AE] v{__version__}")
         console.print()
         if authenticated:
             source = _auth_source(key)
-            console.print(f"  [green]>[/green] Authenticated via {source}")
+            console.print(f"  [#9BC0AE]>[/#9BC0AE] Authenticated via {source}")
         else:
-            console.print("  [red]>[/red] Not authenticated")
+            console.print("  [#FAA2FB]>[/#FAA2FB] Not authenticated")
             console.print("    Run: tvly login")
 
 
