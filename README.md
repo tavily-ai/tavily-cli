@@ -18,14 +18,6 @@ CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, ex
 
 Requires **Python 3.10+**.
 
-### One-line install (macOS / Linux)
-
-```bash
-curl -fsSL https://tavily.com/install.sh | bash
-```
-
-### pip
-
 ```bash
 pip install tavily-cli
 ```
@@ -34,7 +26,7 @@ pip install tavily-cli
 
 ```bash
 git clone https://github.com/tavily-ai/tavily-cli.git
-cd tavily-cli/cli
+cd tavily-cli
 pip install -e .
 ```
 
