@@ -8,6 +8,15 @@ import functools
 import click
 
 
+class TavilyAPIError(Exception):
+    """Structured error from the Tavily API."""
+
+    def __init__(self, message: str, *, status: int | None = None, docs: str | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.docs = docs
+
+
 def json_option(func):
     """Add --json flag to a command and resolve from parent context if not set."""
     @click.option("--json", "json_output", is_flag=True, default=False, help="Output as JSON.")
@@ -21,11 +30,27 @@ def json_option(func):
     return wrapper
 
 
+# Status codes that represent usage/plan limits rather than real errors.
+_LIMIT_STATUSES = {429, 432}
+
+
 def handle_api_error(e: Exception, json_mode: bool) -> None:
-    """Print an API error and exit with code 4."""
+    """Print an API error and exit."""
     if json_mode:
         click.echo(json.dumps({"error": str(e)}))
-    else:
-        from tavily_cli.theme import err_console
-        err_console.print(f"  [red]> Error:[/red] {e}")
+        raise SystemExit(4)
+
+    from tavily_cli.theme import err_console
+
+    if isinstance(e, TavilyAPIError) and e.status in _LIMIT_STATUSES:
+        err_console.print()
+        err_console.print(f"  [yellow]>[/yellow] {e}")
+        err_console.print()
+        err_console.print("  [dim]Upgrade your plan at[/dim] [bright_cyan link=https://tavily.com]tavily.com[/bright_cyan link]")
+        if e.docs:
+            err_console.print(f"  [dim]Docs:[/dim] [dim link={e.docs}]{e.docs}[/dim link]")
+        err_console.print()
+        raise SystemExit(3)
+
+    err_console.print(f"  [red]> Error:[/red] {e}")
     raise SystemExit(4)

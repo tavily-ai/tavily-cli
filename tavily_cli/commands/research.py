@@ -134,7 +134,16 @@ def run(
     except Exception as e:
         handle_api_error(e, json_mode)
 
+    # If the initial response is already complete (e.g., MCP endpoint returns
+    # the full result synchronously), skip polling entirely.
+    if result.get("status") in ("completed", "failed") or result.get("content"):
+        print_research_result(result, json_mode=json_mode, output_file=output_file)
+        return
+
     request_id = result.get("request_id")
+    if not request_id:
+        # No request_id and not complete — unexpected response.
+        handle_api_error(RuntimeError(f"Unexpected API response: {result}"), json_mode)
 
     if no_wait:
         emit({"request_id": request_id, "status": result.get("status", "pending")}, json_mode=True, output_file=output_file)
