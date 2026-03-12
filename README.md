@@ -115,18 +115,18 @@ tavily map https://example.com --select-paths "/blog/.*" --limit 500
 
 ```bash
 # Run research and wait for results
-tavily research run "Competitive landscape of AI code assistants"
+tavily research "Competitive landscape of AI code assistants"
 
 # Use pro model for comprehensive analysis
-tavily research run "Electric vehicle market analysis" --model pro
+tavily research "Electric vehicle market analysis" --model pro
 
 # Async: start and poll separately
-tavily research run "topic" --no-wait --json    # returns request_id
+tavily research "topic" --no-wait --json        # returns request_id
 tavily research status <request_id> --json      # check status
 tavily research poll <request_id> --json        # wait and get result
 
 # Structured output
-tavily research run "AI market size" --output-schema schema.json --json
+tavily research "AI market size" --output-schema schema.json --json
 ```
 
 ## CLI Overview
@@ -140,8 +140,8 @@ tavily
 ├── extract <urls...>        # Extract content from URLs
 ├── crawl <url>              # Crawl a website
 ├── map <url>                # Discover URLs (no content)
-└── research                 # Deep research (async)
-    ├── run <query>          # Start a research task
+└── research <query>         # Deep research (async)
+    ├── run <query>          # Start a research task (same as above)
     ├── status <id>          # Check task status
     └── poll <id>            # Poll until completion
 ```
@@ -158,10 +158,10 @@ tavily extract https://example.com --json
 
 # Read input from stdin with "-"
 echo "What is the latest funding for Anthropic?" | tavily search - --json
-echo "Research question" | tavily research run - --json
+echo "Research question" | tavily research - --json
 
 # Async research: launch then poll separately
-tavily research run "question" --no-wait --json    # returns request_id
+tavily research "question" --no-wait --json        # returns request_id
 tavily research status <id> --json                 # check status
 tavily research poll <id> --json                   # wait and get result
 
@@ -248,7 +248,7 @@ tavily --status --json   # structured status
 | `--timeout` | Max wait (10-150 seconds) |
 | `-o` / `--output` | Save output to file |
 
-### `tavily research run`
+### `tavily research <query>` / `tavily research run <query>`
 
 | Option | Description |
 |--------|-------------|

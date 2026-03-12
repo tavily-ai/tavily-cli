@@ -11,9 +11,38 @@ import click
 from tavily_cli.common import handle_api_error, json_option
 
 
-@click.group()
+class ResearchGroup(click.Group):
+    """Custom group that treats unknown subcommands as a query for 'run'."""
+
+    # Subcommands that require a positional arg (request_id) after them.
+    _SUBCOMMANDS_WITH_REQUIRED_ARG = {"status", "poll"}
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        if args and not args[0].startswith("-"):
+            first = args[0]
+            if first not in self.commands:
+                # Not a known subcommand — treat as a query for 'run'.
+                args = ["run"] + args
+            elif first in self._SUBCOMMANDS_WITH_REQUIRED_ARG:
+                # 'status' and 'poll' require a request_id as the next arg.
+                # If there's no next positional arg, the user likely meant it
+                # as a research query (e.g., "tavily research status").
+                # But always allow --help to pass through to the subcommand.
+                has_positional = len(args) > 1 and not args[1].startswith("-")
+                has_help = "--help" in args or "-h" in args
+                if not has_positional and not has_help:
+                    args = ["run"] + args
+            # 'run' is always treated as the subcommand (use "tavily research run run" to research the word "run").
+        return super().parse_args(ctx, args)
+
+
+@click.group(cls=ResearchGroup)
 def research() -> None:
-    """Deep research commands (run, status, poll)."""
+    """Deep research commands (run, status, poll).
+
+    You can run research directly: tavily research "your query"
+    Or use subcommands: tavily research status <id>
+    """
     pass
 
 
@@ -56,6 +85,8 @@ def run(
     """Start a research task.
 
     QUERY is the research topic. Use "-" to read from stdin.
+
+    You can also run directly: tavily research "your query"
     """
     from tavily_cli.config import get_client
     from tavily_cli.output import emit, print_research_result
