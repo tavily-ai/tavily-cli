@@ -39,7 +39,7 @@ Repository = "https://github.com/tavily-ai/tavily-cli"
 Issues = "https://github.com/tavily-ai/tavily-cli/issues"
 
 [project.scripts]
-tavily = "tavily_cli.cli:main"
+tvly = "tavily_cli.cli:main"
 
 [project.optional-dependencies]
 dev = [
