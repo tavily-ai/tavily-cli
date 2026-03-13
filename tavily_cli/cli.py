@@ -24,7 +24,12 @@ def cli(ctx: click.Context, version: bool, show_status: bool, json_output: bool)
     Authenticate with: tvly login --api-key tvly-YOUR_KEY
     Or set TAVILY_API_KEY environment variable.
     """
+    import sys
+
     ctx.ensure_object(dict)
+    # Auto-enable JSON when stdout is piped (e.g. by Claude Code, scripts, jq)
+    if not json_output and not sys.stdout.isatty():
+        json_output = True
     ctx.obj["json_output"] = json_output
 
     if version:

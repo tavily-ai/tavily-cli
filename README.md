@@ -162,6 +162,8 @@ tvly
 
 All commands support `--json` output and can be fully controlled via CLI arguments.
 
+**Auto-detection:** JSON output is automatically enabled when stdout is piped (e.g., called from Claude Code, scripts, or piped to `jq`). No need to pass `--json` explicitly.
+
 ```bash
 # Every command supports --json for structured output
 tvly search "query" --json
