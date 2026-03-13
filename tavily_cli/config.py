@@ -22,10 +22,14 @@ def _read_config() -> dict:
 
 
 def _write_config(data: dict) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_DIR.chmod(0o700)
-    CONFIG_FILE.write_text(json.dumps(data, indent=2) + "\n")
-    CONFIG_FILE.chmod(0o600)
+    old_umask = os.umask(0o077)  # ensure new files are owner-only from creation, sets the new umask to 0o077 and returns whatever the previous umask was.
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        CONFIG_DIR.chmod(0o700)
+        CONFIG_FILE.write_text(json.dumps(data, indent=2) + "\n")
+        CONFIG_FILE.chmod(0o600)
+    finally:
+        os.umask(old_umask)
 
 
 def save_api_key(api_key: str) -> None:
