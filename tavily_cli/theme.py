@@ -7,6 +7,7 @@ from typing import Generator
 
 from rich.console import Console
 from rich.status import Status
+from rich.theme import Theme
 
 # Brand colors — from tavily.com
 AQUA = "#5CD9E6"
@@ -22,8 +23,23 @@ WARN = YELLOW
 ERROR = PINK
 DIM = "dim"
 
-console = Console()
-err_console = Console(stderr=True)
+# Custom theme to override Rich's default purple/blue Markdown colors
+TAVILY_THEME = Theme({
+    "markdown.link": f"{GREEN}",
+    "markdown.link_url": f"dim",
+    "markdown.h1": f"bold {AQUA}",
+    "markdown.h2": f"bold {AQUA}",
+    "markdown.h3": f"bold {AQUA}",
+    "markdown.h4": f"bold {AQUA}",
+    "markdown.h5": f"bold {AQUA}",
+    "markdown.code": f"{YELLOW}",
+    "markdown.item.number": f"bold {GREEN}",
+    "markdown.item.bullet": f"bold {GREEN}",
+    "table.header": f"bold {AQUA}",
+})
+
+console = Console(theme=TAVILY_THEME)
+err_console = Console(stderr=True, theme=TAVILY_THEME)
 
 LOGO = """\
 [#5CD9E6]   _              _ _       [/#5CD9E6]

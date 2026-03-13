@@ -233,7 +233,7 @@ def run(
         with err_console.status("", spinner="dots") as live:
             next_poll = 0
             while elapsed < timeout:
-                live.update(f"[#5CD9E6]Researching... {elapsed}s elapsed[/#5CD9E6]")
+                live.update(f"[#5CD9E6]Researching...[/#5CD9E6]")
                 if elapsed >= next_poll:
                     try:
                         response = client.get_research(request_id)
@@ -317,7 +317,7 @@ def poll(ctx: click.Context, request_id: str, poll_interval: int, timeout: int, 
         with err_console.status("", spinner="dots") as live:
             next_poll = 0
             while elapsed < timeout:
-                live.update(f"[#5CD9E6]Polling research {request_id[:8]}... {elapsed}s elapsed[/#5CD9E6]")
+                live.update(f"[#5CD9E6]Polling research {request_id[:8]}...[/#5CD9E6]")
                 if elapsed >= next_poll:
                     try:
                         response = client.get_research(request_id)
