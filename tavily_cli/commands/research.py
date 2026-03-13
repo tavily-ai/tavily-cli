@@ -155,7 +155,7 @@ def run(
     json_mode = _resolve_json(ctx, json_flag)
 
     if query == "-":
-        query = sys.stdin.read().strip()
+        query = sys.stdin.read(100_000).strip()
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
 

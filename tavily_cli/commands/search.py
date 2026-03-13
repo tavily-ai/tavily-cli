@@ -54,7 +54,7 @@ def search(
     from tavily_cli.output import print_search_results
 
     if query == "-":
-        query = sys.stdin.read().strip()
+        query = sys.stdin.read(100_000).strip()
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
 

@@ -23,7 +23,9 @@ def _read_config() -> dict:
 
 def _write_config(data: dict) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_DIR.chmod(0o700)
     CONFIG_FILE.write_text(json.dumps(data, indent=2) + "\n")
+    CONFIG_FILE.chmod(0o600)
 
 
 def save_api_key(api_key: str) -> None:
