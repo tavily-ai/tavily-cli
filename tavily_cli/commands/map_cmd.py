@@ -67,8 +67,11 @@ def map_urls(
     if timeout is not None:
         kwargs["timeout"] = timeout
 
+    from tavily_cli.theme import spinner
+
     try:
-        response = client.map(**kwargs)
+        with spinner(f"Mapping {url}...", json_mode=json_output):
+            response = client.map(**kwargs)
     except Exception as e:
         handle_api_error(e, json_output)
 

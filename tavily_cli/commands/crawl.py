@@ -85,8 +85,11 @@ def crawl(
     if timeout is not None:
         kwargs["timeout"] = timeout
 
+    from tavily_cli.theme import spinner
+
     try:
-        response = client.crawl(**kwargs)
+        with spinner(f"Crawling {url}...", json_mode=json_output):
+            response = client.crawl(**kwargs)
     except Exception as e:
         handle_api_error(e, json_output)
 

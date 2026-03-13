@@ -16,6 +16,20 @@ import httpx
 MCP_URL = "https://mcp.tavily.com/mcp"
 
 
+def _raise_if_api_error(parsed: dict) -> None:
+    """Raise TavilyAPIError if the parsed response contains an error."""
+    if not isinstance(parsed, dict) or "error" not in parsed:
+        return
+    from tavily_cli.common import TavilyAPIError
+    detail = parsed.get("detail", {})
+    msg = detail.get("error", parsed["error"]) if isinstance(detail, dict) else parsed["error"]
+    raise TavilyAPIError(
+        msg,
+        status=parsed.get("status"),
+        docs=parsed.get("documentation"),
+    )
+
+
 def _call_mcp_tool(token: str, tool_name: str, arguments: dict) -> dict:
     """Call a Tavily MCP tool via JSON-RPC and return the parsed result."""
     request_body = {
@@ -52,14 +66,18 @@ def _call_mcp_tool(token: str, tool_name: str, arguments: dict) -> dict:
             # MCP wraps the response in structuredContent or content[0].text
             structured = result.get("structuredContent")
             if structured:
-                return structured if isinstance(structured, dict) else json.loads(structured)
+                parsed = structured if isinstance(structured, dict) else json.loads(structured)
+                _raise_if_api_error(parsed)
+                return parsed
             content_list = result.get("content", [])
             if content_list:
                 text_val = content_list[0].get("text", "")
                 try:
-                    return json.loads(text_val)
+                    parsed = json.loads(text_val)
                 except (json.JSONDecodeError, TypeError):
                     return {"raw": text_val}
+                _raise_if_api_error(parsed)
+                return parsed
             return result
 
     # If no SSE data lines, try parsing entire response as JSON
