@@ -29,7 +29,8 @@ find_python() {
             version=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null) || continue
             major=$(echo "$version" | cut -d. -f1)
             minor=$(echo "$version" | cut -d. -f2)
-            if [ "$major" -ge "$MIN_PYTHON_MAJOR" ] && [ "$minor" -ge "$MIN_PYTHON_MINOR" ]; then
+            if [ "$major" -gt "$MIN_PYTHON_MAJOR" ] || \
+               { [ "$major" -eq "$MIN_PYTHON_MAJOR" ] && [ "$minor" -ge "$MIN_PYTHON_MINOR" ]; }; then
                 echo "$cmd"
                 return 0
             fi
@@ -48,8 +49,11 @@ main() {
     py_version=$("$PYTHON" --version 2>&1)
     info "Found $py_version"
 
-    # Install via pipx (preferred) or pip
-    if command -v pipx >/dev/null 2>&1; then
+    # Install via uv (fastest), pipx, or pip (fallback)
+    if command -v uv >/dev/null 2>&1; then
+        info "Installing ${PACKAGE_NAME} with uv..."
+        uv tool install "$PACKAGE_NAME" || uv tool upgrade "$PACKAGE_NAME"
+    elif command -v pipx >/dev/null 2>&1; then
         info "Installing ${PACKAGE_NAME} with pipx..."
         pipx install "$PACKAGE_NAME" || pipx upgrade "$PACKAGE_NAME"
     else
