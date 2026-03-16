@@ -42,34 +42,36 @@ find_python() {
 main() {
     printf "\n${BOLD}Tavily CLI Installer${RESET}\n\n"
 
-    # Find Python
-    PYTHON=$(find_python) || error "Python ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}+ is required but not found.
-  Install it from https://www.python.org/downloads/ and try again."
-
-    py_version=$("$PYTHON" --version 2>&1)
-    info "Found $py_version"
-
-    # Install via uv (fastest), pipx, or pip (fallback)
+    # Install via uv (fastest) — no system Python required
     if command -v uv >/dev/null 2>&1; then
         info "Installing ${PACKAGE_NAME} with uv..."
         uv tool install "$PACKAGE_NAME" || uv tool upgrade "$PACKAGE_NAME"
-    elif command -v pipx >/dev/null 2>&1; then
-        info "Installing ${PACKAGE_NAME} with pipx..."
-        pipx install "$PACKAGE_NAME" || pipx upgrade "$PACKAGE_NAME"
     else
-        info "Installing ${PACKAGE_NAME} with pip..."
-        # Use --user only when outside a virtual environment
-        in_venv=$("$PYTHON" -c "import sys; print(int(sys.prefix != sys.base_prefix or hasattr(sys, 'real_prefix')))" 2>/dev/null) || in_venv=0
-        if [ "$in_venv" = "1" ]; then
-            "$PYTHON" -m pip install "$PACKAGE_NAME"
-        else
-            "$PYTHON" -m pip install --user "$PACKAGE_NAME"
+        # Find Python (needed for pipx / pip)
+        PYTHON=$(find_python) || error "Python ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}+ is required but not found.
+  Install it from https://www.python.org/downloads/ or install uv (https://docs.astral.sh/uv/) and try again."
 
-            # Warn if ~/.local/bin is not in PATH (common pip --user location)
-            user_bin=$("$PYTHON" -c "import site; print(site.getusersitepackages().replace('/lib/python', '/bin').split('/lib/')[0] + '/bin')" 2>/dev/null) || true
-            if [ -n "$user_bin" ] && ! echo "$PATH" | tr ':' '\n' | grep -qx "$user_bin"; then
-                warn "$user_bin is not in your PATH. Add it with:"
-                printf "  export PATH=\"%s:\$PATH\"\n\n" "$user_bin"
+        py_version=$("$PYTHON" --version 2>&1)
+        info "Found $py_version"
+
+        if command -v pipx >/dev/null 2>&1; then
+            info "Installing ${PACKAGE_NAME} with pipx..."
+            pipx install "$PACKAGE_NAME" || pipx upgrade "$PACKAGE_NAME"
+        else
+            info "Installing ${PACKAGE_NAME} with pip..."
+            # Use --user only when outside a virtual environment
+            in_venv=$("$PYTHON" -c "import sys; print(int(sys.prefix != sys.base_prefix or hasattr(sys, 'real_prefix')))" 2>/dev/null) || in_venv=0
+            if [ "$in_venv" = "1" ]; then
+                "$PYTHON" -m pip install "$PACKAGE_NAME"
+            else
+                "$PYTHON" -m pip install --user "$PACKAGE_NAME"
+
+                # Warn if ~/.local/bin is not in PATH (common pip --user location)
+                user_bin=$("$PYTHON" -c "import site; print(site.getusersitepackages().replace('/lib/python', '/bin').split('/lib/')[0] + '/bin')" 2>/dev/null) || true
+                if [ -n "$user_bin" ] && ! echo "$PATH" | tr ':' '\n' | grep -qx "$user_bin"; then
+                    warn "$user_bin is not in your PATH. Add it with:"
+                    printf "  export PATH=\"%s:\$PATH\"\n\n" "$user_bin"
+                fi
             fi
         fi
     fi
