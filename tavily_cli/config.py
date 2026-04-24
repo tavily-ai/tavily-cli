@@ -5,11 +5,16 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from uuid import uuid4
 
 CONFIG_DIR = Path.home() / ".tavily"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 MCP_AUTH_DIR = Path.home() / ".mcp-auth"
+
+# One session per CLI invocation. Module-level: generated on first import,
+# reused across all commands within a single `tvly` run.
+SESSION_ID = uuid4().hex
 
 
 def _read_config() -> dict:
@@ -36,6 +41,17 @@ def save_api_key(api_key: str) -> None:
     config = _read_config()
     config["api_key"] = api_key
     _write_config(config)
+
+
+def get_human_id() -> str | None:
+    """Resolve the optional human_id with precedence: env var > config file.
+
+    Returns None when unset — the CLI omits the header entirely in that case.
+    """
+    value = os.environ.get("TAVILY_HUMAN_ID")
+    if value:
+        return value
+    return _read_config().get("human_id")
 
 
 def clear_credentials() -> None:
@@ -134,9 +150,15 @@ def get_api_key_or_exit() -> str:
 def get_client():
     """Return the appropriate Tavily client (SDK or MCP) based on credential type."""
     key = get_api_key_or_exit()
+    human_id = get_human_id()
     if is_oauth_token(key):
         from tavily_cli.mcp_client import McpTavilyClient
-        return McpTavilyClient(api_key=key)
+        return McpTavilyClient(api_key=key, session_id=SESSION_ID, human_id=human_id)
     else:
         from tavily import TavilyClient
-        return TavilyClient(api_key=key)
+        return TavilyClient(
+            api_key=key,
+            session_id=SESSION_ID,
+            human_id=human_id,
+            client_name="tavily-cli",
+        )
