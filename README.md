@@ -286,6 +286,15 @@ Poll until completion and return results. Same `--poll-interval`, `--timeout`, `
 | Variable | Description |
 |----------|-------------|
 | `TAVILY_API_KEY` | API key (highest priority, no login needed) |
+| `TAVILY_HUMAN_ID` | Optional identifier attached to every request for usage attribution |
+
+```bash
+# Via env var (highest priority)
+export TAVILY_HUMAN_ID=alice@example.com
+
+# Or persist it in the config file
+# (~/.tavily/config.json — set the "human_id" key)
+```
 
 ## Related
 
