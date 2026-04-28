@@ -30,7 +30,13 @@ def _raise_if_api_error(parsed: dict) -> None:
     )
 
 
-def _call_mcp_tool(token: str, tool_name: str, arguments: dict) -> dict:
+def _call_mcp_tool(
+    token: str,
+    tool_name: str,
+    arguments: dict,
+    session_id: str | None = None,
+    human_id: str | None = None,
+) -> dict:
     """Call a Tavily MCP tool via JSON-RPC and return the parsed result."""
     request_body = {
         "jsonrpc": "2.0",
@@ -42,15 +48,25 @@ def _call_mcp_tool(token: str, tool_name: str, arguments: dict) -> dict:
         },
     }
 
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "x-client-source": "tavily-cli",
+    }
+    if session_id:
+        # mcp-session-id: respected by the remote MCP's session middleware,
+        # preventing its auto-generation so Tavily logs the CLI-scoped session.
+        # X-Session-Id: forwarded to the Tavily API for session attribution.
+        headers["mcp-session-id"] = session_id
+        headers["X-Session-Id"] = session_id
+    if human_id:
+        headers["X-Human-Id"] = human_id
+
     response = httpx.post(
         MCP_URL,
         json=request_body,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-            "x-client-source": "tavily-cli",
-        },
+        headers=headers,
         timeout=180.0,
     )
     response.raise_for_status()
@@ -93,23 +109,39 @@ def _call_mcp_tool(token: str, tool_name: str, arguments: dict) -> dict:
 class McpTavilyClient:
     """Drop-in replacement for TavilyClient that uses the MCP endpoint with OAuth tokens."""
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        session_id: str | None = None,
+        human_id: str | None = None,
+    ) -> None:
         self._token = api_key
+        self._session_id = session_id
+        self._human_id = human_id
+
+    def _call(self, tool_name: str, arguments: dict) -> dict:
+        return _call_mcp_tool(
+            self._token,
+            tool_name,
+            arguments,
+            session_id=self._session_id,
+            human_id=self._human_id,
+        )
 
     def search(self, **kwargs: Any) -> dict:
-        return _call_mcp_tool(self._token, "tavily_search", kwargs)
+        return self._call("tavily_search", kwargs)
 
     def extract(self, **kwargs: Any) -> dict:
-        return _call_mcp_tool(self._token, "tavily_extract", kwargs)
+        return self._call("tavily_extract", kwargs)
 
     def crawl(self, **kwargs: Any) -> dict:
-        return _call_mcp_tool(self._token, "tavily_crawl", kwargs)
+        return self._call("tavily_crawl", kwargs)
 
     def map(self, **kwargs: Any) -> dict:
-        return _call_mcp_tool(self._token, "tavily_map", kwargs)
+        return self._call("tavily_map", kwargs)
 
     def research(self, **kwargs: Any) -> dict:
-        return _call_mcp_tool(self._token, "tavily_research", kwargs)
+        return self._call("tavily_research", kwargs)
 
     def get_research(self, request_id: str) -> dict:
-        return _call_mcp_tool(self._token, "tavily_get_research", {"request_id": request_id})
+        return self._call("tavily_get_research", {"request_id": request_id})
