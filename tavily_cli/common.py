@@ -7,6 +7,10 @@ import functools
 
 import click
 
+from tavily import TavilyKeylessLimitError
+
+from tavily_cli.keyless import format_keyless_envelope_for_terminal
+
 
 class TavilyAPIError(Exception):
     """Structured error from the Tavily API."""
@@ -15,6 +19,44 @@ class TavilyAPIError(Exception):
         super().__init__(message)
         self.status = status
         self.docs = docs
+
+
+def handle_keyless_cap_hit(e: TavilyKeylessLimitError, json_mode: bool) -> None:
+    """Render a keyless rate-limit cap-hit and exit non-zero."""
+    if json_mode:
+        click.echo(json.dumps({
+            "error": {
+                "code": e.code,
+                "message": e.message,
+                "window": e.window,
+                "retry_after_seconds": e.retry_after_seconds,
+                "next_actions": e.next_actions,
+            }
+        }))
+        raise SystemExit(3)
+
+    from tavily_cli.theme import err_console
+
+    block = format_keyless_envelope_for_terminal(
+        message=e.message,
+        retry_after_seconds=e.retry_after_seconds,
+        next_actions=e.next_actions,
+    )
+    err_console.print()
+    for i, line in enumerate(block.splitlines()):
+        if i == 0:
+            err_console.print(f"  [#FFC769]>[/#FFC769] [bold]{line}[/bold]")
+        elif not line:
+            err_console.print()
+        else:
+            err_console.print(f"    {line}", markup=False, highlight=False)
+    err_console.print()
+    err_console.print(
+        "  [dim]Run [/dim][#9BC0AE]tvly login[/#9BC0AE][dim] to authenticate "
+        "and remove this cap.[/dim]"
+    )
+    err_console.print()
+    raise SystemExit(3)
 
 
 def json_option(func):

@@ -49,10 +49,13 @@ def crawl(
     """Crawl a website starting from URL.
 
     Returns full content for each discovered page.
+
+    Requires a Tavily API key. Sign up at https://tavily.com
     """
-    from tavily_cli.config import get_client
+    from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import print_crawl_results
 
+    require_api_key_friendly("crawl")
     client = get_client()
 
     kwargs: dict = {"url": url}

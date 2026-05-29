@@ -39,10 +39,13 @@ def map_urls(
     """Discover all URLs on a website (no content extraction).
 
     Returns a list of URLs found starting from the given URL.
+
+    Requires a Tavily API key. Sign up at https://tavily.com
     """
-    from tavily_cli.config import get_client
+    from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import print_map_results
 
+    require_api_key_friendly("map")
     client = get_client()
 
     kwargs: dict = {"url": url}

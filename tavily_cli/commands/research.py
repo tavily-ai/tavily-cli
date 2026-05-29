@@ -148,8 +148,10 @@ def run(
     QUERY is the research topic. Use "-" to read from stdin.
 
     You can also run directly: tvly research "your query"
+
+    Requires a Tavily API key. Sign up at https://tavily.com
     """
-    from tavily_cli.config import get_client
+    from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import emit, print_research_result
 
     json_mode = _resolve_json(ctx, json_flag)
@@ -159,6 +161,7 @@ def run(
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
 
+    require_api_key_friendly("research")
     client = get_client()
 
     schema = None
@@ -257,10 +260,11 @@ def run(
 @click.pass_context
 def status(ctx: click.Context, request_id: str, json_flag: bool) -> None:
     """Check the status of a research task."""
-    from tavily_cli.config import get_client
+    from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import emit
 
     json_mode = _resolve_json(ctx, json_flag)
+    require_api_key_friendly("research status")
     client = get_client()
 
     try:
@@ -291,11 +295,12 @@ def status(ctx: click.Context, request_id: str, json_flag: bool) -> None:
 @click.pass_context
 def poll(ctx: click.Context, request_id: str, poll_interval: int, timeout: int, output_file: str | None, json_flag: bool) -> None:
     """Poll a research task until completion and return results."""
-    from tavily_cli.config import get_client
+    from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import emit, print_research_result
     from tavily_cli.theme import err_console
 
     json_mode = _resolve_json(ctx, json_flag)
+    require_api_key_friendly("research poll")
     client = get_client()
 
     elapsed = 0
