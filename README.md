@@ -33,6 +33,19 @@ pip install -e .
 
 ## Quick Start
 
+### Keyless mode
+
+`tvly search` and `tvly extract` work without an API key — try them right
+after installing. A fair-use rate-limit cap applies; when reached, the CLI
+prints a clear message with sign-up and continuation options. All other
+commands (`crawl`, `map`, `research`) require a key.
+
+```bash
+pip install tavily-cli
+tvly search "latest AI trends"
+tvly extract https://example.com
+```
+
 ### 1. Authenticate
 
 ```bash

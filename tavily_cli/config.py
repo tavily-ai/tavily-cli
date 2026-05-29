@@ -54,6 +54,15 @@ def get_human_id() -> str | None:
     return _read_config().get("human_id")
 
 
+def get_api_base_url() -> str | None:
+    """Resolve an optional API base URL with precedence: env var > config file."""
+    value = os.environ.get("TAVILY_API_BASE_URL")
+    if value:
+        return value.rstrip("/")
+    configured = _read_config().get("api_base_url")
+    return configured.rstrip("/") if configured else None
+
+
 def clear_credentials() -> None:
     if CONFIG_FILE.exists():
         CONFIG_FILE.unlink()
@@ -150,15 +159,64 @@ def get_api_key_or_exit() -> str:
 def get_client():
     """Return the appropriate Tavily client (SDK or MCP) based on credential type."""
     key = get_api_key_or_exit()
+    return _build_keyed_client(key)
+
+
+def _build_keyed_client(key: str):
+    """Build a keyed Tavily client (SDK or MCP) for the given credential."""
     human_id = get_human_id()
     if is_oauth_token(key):
         from tavily_cli.mcp_client import McpTavilyClient
         return McpTavilyClient(api_key=key, session_id=SESSION_ID, human_id=human_id)
-    else:
-        from tavily import TavilyClient
-        return TavilyClient(
-            api_key=key,
+    from tavily import TavilyClient
+    return TavilyClient(
+        api_key=key,
+        session_id=SESSION_ID,
+        human_id=human_id,
+        client_name="tavily-cli",
+        api_base_url=get_api_base_url(),
+    )
+
+
+def get_client_or_keyless():
+    """Return a Tavily client, falling back to keyless mode when no key is set."""
+    key = get_api_key()
+    if key:
+        return _build_keyed_client(key), False
+    from tavily import TavilyClient
+    return (
+        TavilyClient(
             session_id=SESSION_ID,
-            human_id=human_id,
+            human_id=get_human_id(),
             client_name="tavily-cli",
-        )
+            client_source="tavily-cli-keyless",
+            api_base_url=get_api_base_url(),
+        ),
+        True,
+    )
+
+
+def require_api_key_friendly(command_name: str) -> str:
+    """Return the API key, or print a friendly message and exit non-zero."""
+    import sys
+
+    key = get_api_key()
+    if key:
+        return key
+
+    from rich.console import Console
+    console = Console(stderr=True)
+    console.print()
+    console.print(
+        f"  [#FAA2FB]>[/#FAA2FB] The [bold]{command_name}[/bold] command requires a Tavily API key."
+    )
+    console.print()
+    console.print("  Sign up for a free key at [link=https://tavily.com]https://tavily.com[/link]")
+    console.print("  Then run [#9BC0AE]tvly login --api-key tvly-YOUR_KEY[/#9BC0AE]")
+    console.print()
+    console.print(
+        "  [dim]Tip: [#9BC0AE]tvly search[/#9BC0AE] and [#9BC0AE]tvly extract[/#9BC0AE] "
+        "work without an API key (subject to a rate-limit cap).[/dim]"
+    )
+    console.print()
+    sys.exit(3)

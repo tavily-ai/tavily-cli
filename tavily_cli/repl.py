@@ -37,7 +37,8 @@ def _print_banner() -> None:
         err_console.print(f"  [#9BC0AE]>[/#9BC0AE] Authenticated via {source}")
     else:
         err_console.print(f"  [#FAA2FB]>[/#FAA2FB] Not authenticated")
-        err_console.print(f"    Type [#9BC0AE]login[/#9BC0AE] to authenticate.")
+        err_console.print(f"    [dim]search and extract work without a key (with a rate-limit cap).[/dim]")
+        err_console.print(f"    Type [#9BC0AE]login[/#9BC0AE] to authenticate and remove the cap.")
 
     err_console.print()
 

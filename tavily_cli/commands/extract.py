@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import click
 
-from tavily_cli.common import handle_api_error, json_option
+from tavily import TavilyKeylessLimitError
+
+from tavily_cli.common import handle_api_error, handle_keyless_cap_hit, json_option
 
 
 @click.command()
@@ -31,11 +33,14 @@ def extract(
     """Extract content from one or more URLs.
 
     Provide URLs as positional arguments (max 20).
+
+    Works without an API key (subject to a rate-limit cap). Run
+    `tvly login` to authenticate and remove the cap.
     """
-    from tavily_cli.config import get_client
+    from tavily_cli.config import get_client_or_keyless
     from tavily_cli.output import print_extract_results
 
-    client = get_client()
+    client, _is_keyless = get_client_or_keyless()
 
     url_list = list(urls)
     if len(url_list) > 20:
@@ -60,6 +65,8 @@ def extract(
     try:
         with spinner(f"Extracting {len(url_list)} URL{'s' if len(url_list) > 1 else ''}...", json_mode=json_output):
             response = client.extract(**kwargs)
+    except TavilyKeylessLimitError as e:
+        handle_keyless_cap_hit(e, json_output)
     except Exception as e:
         handle_api_error(e, json_output)
 

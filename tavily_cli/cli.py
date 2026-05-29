@@ -70,7 +70,8 @@ def _print_welcome() -> None:
         console.print(f"  [#9BC0AE]>[/#9BC0AE] Authenticated via {source}")
     else:
         console.print(f"  [#FAA2FB]>[/#FAA2FB] Not authenticated")
-        console.print(f"    [dim]Run:[/dim] tvly login")
+        console.print(f"    [dim]search and extract work without a key (with a rate-limit cap).[/dim]")
+        console.print(f"    [dim]Run:[/dim] tvly login [dim]to remove the cap.[/dim]")
 
     console.print()
 
