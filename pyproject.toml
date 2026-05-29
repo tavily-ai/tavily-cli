@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    { name = "Tavily", email = "dean.sacoransky@tavily.com" }
+    { name = "Tavily", email = "support@tavily.com" }
 ]
 keywords = ["ai", "tavily", "web-search", "llm", "rag", "agents", "research", "crawl", "extract"]
 classifiers = [
