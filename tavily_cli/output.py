@@ -1,4 +1,12 @@
-"""Output formatting: Rich for humans, JSON for agents, -o for file output."""
+"""Output formatting: Rich for humans, JSON for agents, -o for file output.
+
+All human-readable rendering treats result fields (titles, URLs, snippets,
+answers, page content, source lists, error text) as untrusted: they originate
+from the web, the Tavily API, or an MCP response. Rich does not strip raw
+terminal escape sequences from rendered strings and parses ``[...]`` markup in
+plain strings, so every untrusted field is routed through ``sanitize_control``
+and rendered via ``Text``/validated links rather than markup-bearing f-strings.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +24,8 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
+from tavily_cli.common import sanitize_control
+
 
 console = Console()
 err_console = Console(stderr=True)
@@ -24,6 +34,37 @@ err_console = Console(stderr=True)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _safe_text(value: Any, *, style: str = "") -> Text:
+    """Build a Rich Text from untrusted content.
+
+    ``Text.append`` does not parse Rich markup and ``sanitize_control`` strips
+    terminal escape bytes, so attacker-controlled fields cannot inject markup,
+    fake hyperlinks, or ANSI/OSC control sequences.
+    """
+    return Text(sanitize_control(value), style=style)
+
+
+def _safe_link(url: Any, label: Any | None = None, *, style: str = "") -> Text:
+    """Render a possibly-attacker-controlled URL safely.
+
+    The clickable link is applied only for http/https schemes, and the target
+    is stripped of escape bytes, defeating OSC-8 hyperlink and Rich-markup link
+    injection (e.g. a URL that closes ``[link]`` and opens its own).
+    """
+    clean_url = sanitize_control(url)
+    display = sanitize_control(label) if label is not None else clean_url
+    text = Text(display, style=style)
+    try:
+        scheme = urlparse(clean_url).scheme
+    except ValueError:
+        # urlparse rejects some malformed (attacker-controlled) URLs, e.g.
+        # unbalanced brackets ("Invalid IPv6 URL"); render as plain text.
+        scheme = ""
+    if scheme in ("http", "https"):
+        text.stylize(f"link {clean_url}")
+    return text
+
 
 def _score_label(score: float | None) -> Text:
     """Return a styled relevance score label."""
@@ -56,7 +97,11 @@ def _domain(url: str) -> str:
 # ---------------------------------------------------------------------------
 
 def emit(data: Any, *, json_mode: bool, output_file: str | None = None, pretty: bool = False) -> None:
-    """Write JSON data to stdout (or a file). Used in --json mode."""
+    """Write JSON data to stdout (or a file). Used in --json mode.
+
+    json.dumps escapes control characters (incl. ESC) as \\uXXXX, so this path
+    is safe from terminal-escape injection without extra stripping.
+    """
     text = json.dumps(data, indent=2 if pretty else None, ensure_ascii=False)
     if output_file:
         with open(output_file, "w", encoding="utf-8") as f:
@@ -87,7 +132,7 @@ def print_search_results(data: dict, *, json_mode: bool, output_file: str | None
         console.print()
         console.print(f"  [#5CD9E6 bold]Answer[/#5CD9E6 bold]")
         console.print()
-        console.print(Markdown(answer), width=min(console.width, 100))
+        console.print(Markdown(sanitize_control(answer)), width=min(console.width, 100))
         console.print()
 
     if not results:
@@ -102,16 +147,22 @@ def print_search_results(data: dict, *, json_mode: bool, output_file: str | None
 
         header = Text()
         header.append(f"{i}. ", style="bold #8385F9")
-        header.append(title, style="bold")
+        header.append(sanitize_control(title), style="bold")
         header.append("  ")
         header.append_text(_score_label(score))
         console.print(header)
-        console.print(f"   [link={url}]{_domain(url)}[/link]", style="#FAA2FB")
+
+        domain_line = Text("   ")
+        domain_line.append_text(_safe_link(url, _domain(url), style="#FAA2FB"))
+        console.print(domain_line)
+
         if content:
             snippet = content[:300]
             if len(content) > 300:
                 snippet += "..."
-            console.print(f"   {snippet}", style="dim")
+            snippet_line = Text("   ")
+            snippet_line.append(sanitize_control(snippet), style="dim")
+            console.print(snippet_line)
         console.print()
 
     _footer("Search", len(results), "results", response_time)
@@ -122,9 +173,9 @@ def print_search_results(data: dict, *, json_mode: bool, output_file: str | None
         console.print(f"[bold]Images ({len(images)}):[/bold]")
         for img in images:
             if isinstance(img, dict):
-                console.print(f"  {img.get('url', img)}")
+                console.print(_safe_text(f"  {img.get('url', img)}"))
             else:
-                console.print(f"  {img}")
+                console.print(_safe_text(f"  {img}"))
 
 
 # ---------------------------------------------------------------------------
@@ -145,11 +196,15 @@ def print_extract_results(data: dict, *, json_mode: bool, output_file: str | Non
         char_count = len(raw) if raw else 0
 
         console.print()
-        console.print(f"  [#5CD9E6 bold]{url}[/#5CD9E6 bold]")
-        console.print(f"  [dim]{_domain(url)} ({char_count:,} chars)[/dim]")
+        url_line = Text("  ")
+        url_line.append(sanitize_control(url), style="#5CD9E6 bold")
+        console.print(url_line)
+        meta_line = Text("  ")
+        meta_line.append(f"{sanitize_control(_domain(url))} ({char_count:,} chars)", style="dim")
+        console.print(meta_line)
         console.print()
         if raw:
-            console.print(Markdown(raw[:3000]), width=min(console.width, 100))
+            console.print(Markdown(sanitize_control(raw[:3000])), width=min(console.width, 100))
         else:
             console.print("  [dim]No content[/dim]")
         console.print()
@@ -157,7 +212,10 @@ def print_extract_results(data: dict, *, json_mode: bool, output_file: str | Non
     if failed:
         console.print("[#FFC769]Failed extractions:[/#FFC769]")
         for f_item in failed:
-            console.print(f"  [#FAA2FB]x[/#FAA2FB] {f_item.get('url')}: {f_item.get('error')}")
+            line = Text("  ")
+            line.append("x ", style="#FAA2FB")
+            line.append(f"{sanitize_control(f_item.get('url'))}: {sanitize_control(f_item.get('error'))}")
+            console.print(line)
 
     response_time = data.get("response_time")
     _footer("Extract", len(results), f"extracted, {len(failed)} failed", response_time)
@@ -185,7 +243,7 @@ def print_crawl_results(
     results = data.get("results", [])
     base_url = data.get("base_url", "")
 
-    tree = Tree(f"[bold]{base_url}[/bold]")
+    tree = Tree(_safe_text(base_url, style="bold"))
 
     # Group pages by path prefix for a hierarchical view
     for r in results:
@@ -201,14 +259,14 @@ def print_crawl_results(
             path = url
 
         label = Text()
-        label.append(path, style="#5CD9E6")
+        label.append(sanitize_control(path), style="#5CD9E6")
         label.append(f"  ({char_count:,} chars)", style="dim")
 
         node = tree.add(label)
         if raw:
             # First non-empty line as preview
             preview = raw.strip().split("\n")[0][:120]
-            node.add(Text(preview, style="dim"))
+            node.add(_safe_text(preview, style="dim"))
 
     console.print(tree)
 
@@ -254,9 +312,9 @@ def print_map_results(data: dict, *, json_mode: bool, output_file: str | None = 
     results = data.get("results", [])
     base_url = data.get("base_url", "")
 
-    tree = Tree(f"[bold]{base_url}[/bold]")
+    tree = Tree(_safe_text(base_url, style="bold"))
     for url in results:
-        tree.add(f"[link={url}]{url}[/link]")
+        tree.add(_safe_link(url))
 
     console.print(tree)
 
@@ -278,9 +336,15 @@ def print_research_result(data: dict, *, json_mode: bool, output_file: str | Non
     sources = data.get("sources", [])
 
     if status != "completed":
-        console.print(f"[bold]Status:[/bold] {status}")
+        status_line = Text()
+        status_line.append("Status: ", style="bold")
+        status_line.append(sanitize_control(status))
+        console.print(status_line)
         if data.get("error"):
-            console.print(f"[#FAA2FB]Error:[/#FAA2FB] {data['error']}")
+            error_line = Text()
+            error_line.append("Error: ", style="#FAA2FB")
+            error_line.append(sanitize_control(data["error"]))
+            console.print(error_line)
         return
 
     # Render the research report as markdown
@@ -288,7 +352,7 @@ def print_research_result(data: dict, *, json_mode: bool, output_file: str | Non
         console.print()
         console.print(f"  [#5CD9E6 bold]Research Report[/#5CD9E6 bold]")
         console.print()
-        console.print(Markdown(content), width=min(console.width, 100))
+        console.print(Markdown(sanitize_control(content)), width=min(console.width, 100))
 
     # Sources as a numbered table
     if sources:
@@ -301,7 +365,7 @@ def print_research_result(data: dict, *, json_mode: bool, output_file: str | Non
         for i, s in enumerate(sources, 1):
             title = s.get("title", "")
             url = s.get("url", "")
-            table.add_row(str(i), title, f"[link={url}]{url}[/link]")
+            table.add_row(str(i), _safe_text(title), _safe_link(url))
 
         console.print(table)
 

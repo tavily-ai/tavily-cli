@@ -66,6 +66,7 @@ def get_api_base_url() -> str | None:
 def clear_credentials() -> None:
     if CONFIG_FILE.exists():
         CONFIG_FILE.unlink()
+    _clear_mcp_tokens()
 
 
 def _decode_jwt_payload(token: str) -> dict | None:
@@ -86,19 +87,22 @@ def _decode_jwt_payload(token: str) -> dict | None:
         return None
 
 
+def _is_tavily_token(token: str) -> bool:
+    """Check if a JWT was issued by Tavily's MCP server (issuer claim only)."""
+    payload = _decode_jwt_payload(token)
+    return bool(payload and payload.get("iss") == "https://mcp.tavily.com/")
+
+
 def _is_valid_tavily_token(token: str) -> bool:
-    """Check if a JWT is a valid, non-expired Tavily token."""
+    """Check if a JWT is a Tavily-issued, non-expired token."""
     import time
 
+    if not _is_tavily_token(token):
+        return False
     payload = _decode_jwt_payload(token)
-    if not payload:
+    exp = payload.get("exp") if payload else None
+    if exp is not None and time.time() >= exp:
         return False
-    if payload.get("iss") != "https://mcp.tavily.com/":
-        return False
-    exp = payload.get("exp")
-    if exp is not None:
-        if time.time() >= exp:
-            return False
     return True
 
 
@@ -115,6 +119,28 @@ def _get_mcp_token() -> str | None:
         except (json.JSONDecodeError, OSError):
             continue
     return None
+
+
+def _clear_mcp_tokens() -> None:
+    """Remove Tavily OAuth tokens from ~/.mcp-auth so logout fully revokes access.
+
+    Scoped to Tavily-issued tokens (by JWT issuer) so other MCP tools that share
+    ~/.mcp-auth are left untouched, and removed regardless of expiry so no stale
+    Tavily token lingers after logout.
+    """
+    if not MCP_AUTH_DIR.is_dir():
+        return
+    for token_file in MCP_AUTH_DIR.rglob("*_tokens.json"):
+        try:
+            data = json.loads(token_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        token = data.get("access_token")
+        if token and _is_tavily_token(token):
+            try:
+                token_file.unlink()
+            except OSError:
+                pass
 
 
 def get_api_key() -> str | None:
