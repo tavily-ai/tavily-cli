@@ -118,7 +118,7 @@ def handle_api_error(e: Exception, json_mode: bool) -> None:
         if e.docs:
             docs = sanitize_control(e.docs)
             safe_docs = escape(docs)
-            if urlparse(docs).scheme in ("http", "https") and "[" not in docs and "]" not in docs:
+            if "[" not in docs and "]" not in docs and urlparse(docs).scheme in ("http", "https"):
                 err_console.print(f"  [dim]Docs:[/dim] [dim link={docs}]{safe_docs}[/dim link]")
             else:
                 err_console.print(f"  [dim]Docs:[/dim] {safe_docs}")
