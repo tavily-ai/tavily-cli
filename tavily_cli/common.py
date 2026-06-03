@@ -4,12 +4,32 @@ from __future__ import annotations
 
 import json
 import functools
+import re
 
 import click
 
 from tavily import TavilyKeylessLimitError
 
 from tavily_cli.keyless import format_keyless_envelope_for_terminal
+
+
+# C0/C1 control and escape bytes, minus tab (\x09), newline (\x0a), and
+# carriage return (\x0d). Stripping these from server- and web-derived text
+# defeats ANSI/OSC terminal-escape injection (screen clears, cursor moves,
+# window-title and clipboard writes) before content reaches a terminal.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+
+def sanitize_control(value: object) -> str:
+    """Strip terminal control/escape bytes from untrusted content.
+
+    Rich does not sanitize raw escape sequences embedded in rendered strings
+    (verified against Markdown(), Text.append(), and f-string markup), so any
+    field that originates from the web, the API, or an MCP response must be
+    passed through this before it is printed.
+    """
+    text = value if isinstance(value, str) else str(value)
+    return _CONTROL_CHARS.sub("", text)
 
 
 class TavilyAPIError(Exception):
@@ -82,17 +102,28 @@ def handle_api_error(e: Exception, json_mode: bool) -> None:
         click.echo(json.dumps({"error": str(e)}))
         raise SystemExit(4)
 
+    from urllib.parse import urlparse
+
+    from rich.markup import escape
+
     from tavily_cli.theme import err_console
+
+    message = escape(sanitize_control(e))
 
     if isinstance(e, TavilyAPIError) and e.status in _LIMIT_STATUSES:
         err_console.print()
-        err_console.print(f"  [#FFC769]>[/#FFC769] {e}")
+        err_console.print(f"  [#FFC769]>[/#FFC769] {message}")
         err_console.print()
         err_console.print("  [dim]Upgrade your plan at[/dim] [#9BC0AE link=https://tavily.com]tavily.com[/#9BC0AE link]")
         if e.docs:
-            err_console.print(f"  [dim]Docs:[/dim] [dim link={e.docs}]{e.docs}[/dim link]")
+            docs = sanitize_control(e.docs)
+            safe_docs = escape(docs)
+            if "[" not in docs and "]" not in docs and urlparse(docs).scheme in ("http", "https"):
+                err_console.print(f"  [dim]Docs:[/dim] [dim link={docs}]{safe_docs}[/dim link]")
+            else:
+                err_console.print(f"  [dim]Docs:[/dim] {safe_docs}")
         err_console.print()
         raise SystemExit(3)
 
-    err_console.print(f"  [#FAA2FB]> Error:[/#FAA2FB] {e}")
+    err_console.print(f"  [#FAA2FB]> Error:[/#FAA2FB] {message}")
     raise SystemExit(4)

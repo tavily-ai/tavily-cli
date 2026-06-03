@@ -129,7 +129,10 @@ def run_repl() -> None:
         try:
             args = shlex.split(line)
         except ValueError as e:
-            err_console.print(f"  [#FAA2FB]Parse error:[/#FAA2FB] {e}")
+            from rich.markup import escape
+
+            from tavily_cli.common import sanitize_control
+            err_console.print(f"  [#FAA2FB]Parse error:[/#FAA2FB] {escape(sanitize_control(e))}")
             continue
 
         # Strip leading "tvly" if user typed it out of habit.
@@ -153,8 +156,14 @@ def run_repl() -> None:
             err_console.print()
             err_console.print("  [dim]Cancelled.[/dim]")
         except click.exceptions.UsageError as e:
-            err_console.print(f"  [#FAA2FB]>[/#FAA2FB] {e.format_message()}")
+            from rich.markup import escape
+
+            from tavily_cli.common import sanitize_control
+            err_console.print(f"  [#FAA2FB]>[/#FAA2FB] {escape(sanitize_control(e.format_message()))}")
         except Exception as e:
-            err_console.print(f"  [#FAA2FB]> Error:[/#FAA2FB] {e}")
+            from rich.markup import escape
+
+            from tavily_cli.common import sanitize_control
+            err_console.print(f"  [#FAA2FB]> Error:[/#FAA2FB] {escape(sanitize_control(e))}")
 
         err_console.print()

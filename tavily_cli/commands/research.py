@@ -7,8 +7,9 @@ import sys
 import time
 
 import click
+from rich.markup import escape
 
-from tavily_cli.common import handle_api_error, json_option
+from tavily_cli.common import handle_api_error, json_option, sanitize_control
 
 
 class ResearchGroup(click.Group):
@@ -88,7 +89,7 @@ def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
                     step = f"{name}: {args}" if args else name
                     if step != current_step:
                         current_step = step
-                        err_console.print(f"  [dim]{step}[/dim]")
+                        err_console.print(f"  [dim]{escape(sanitize_control(step))}[/dim]")
 
             if tool_calls.get("type") == "tool_response":
                 for tr in tool_calls.get("tool_response", []):
@@ -184,10 +185,24 @@ def run(
         try:
             stream_resp = client.research(**kwargs)
             if json_mode:
-                # JSON mode: dump raw SSE as-is.
+                # Re-serialize each SSE event as one JSON line (NDJSON) rather
+                # than forwarding raw SSE bytes: this keeps the output valid,
+                # machine-parseable JSON and lets json.dumps escape any control
+                # characters in server content (raw bytes would otherwise reach
+                # the terminal as escape sequences).
                 for chunk in stream_resp:
                     text = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
-                    click.echo(text, nl=False)
+                    for line in text.splitlines():
+                        if not line.startswith("data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if not payload:
+                            continue
+                        try:
+                            event = json.loads(payload)
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+                        click.echo(json.dumps(event, ensure_ascii=False))
             else:
                 _render_stream(stream_resp, output_file=output_file)
         except Exception as e:
@@ -248,7 +263,7 @@ def run(
                 time.sleep(1)
                 elapsed += 1
             else:
-                err_console.print(f"[#FFC769]Timed out after {timeout}s. Resume with: tvly research poll {request_id}[/#FFC769]")
+                err_console.print(f"[#FFC769]Timed out after {timeout}s. Resume with: tvly research poll {escape(sanitize_control(request_id))}[/#FFC769]")
                 return
 
     print_research_result(response, json_mode=json_mode, output_file=output_file)
@@ -278,12 +293,13 @@ def status(ctx: click.Context, request_id: str, json_flag: bool) -> None:
         from tavily_cli.theme import console
         s = response.get("status", "unknown")
         status_style = {"completed": "#9BC0AE", "failed": "#FAA2FB"}.get(s, "#FFC769")
-        console.print(f"  [bold]Request:[/bold]  {request_id}")
-        console.print(f"  [bold]Status:[/bold]   [{status_style}]{s}[/{status_style}]")
+        safe_request_id = escape(sanitize_control(request_id))
+        console.print(f"  [bold]Request:[/bold]  {safe_request_id}")
+        console.print(f"  [bold]Status:[/bold]   [{status_style}]{escape(sanitize_control(s))}[/{status_style}]")
         if s == "completed":
-            console.print(f"  [dim]Run 'tvly research poll {request_id}' to view results.[/dim]")
+            console.print(f"  [dim]Run 'tvly research poll {safe_request_id}' to view results.[/dim]")
         elif s == "failed":
-            console.print(f"  [#FAA2FB]Error:[/#FAA2FB] {response.get('error', 'Unknown error')}")
+            console.print(f"  [#FAA2FB]Error:[/#FAA2FB] {escape(sanitize_control(response.get('error', 'Unknown error')))}")
 
 
 @research.command()
@@ -322,7 +338,7 @@ def poll(ctx: click.Context, request_id: str, poll_interval: int, timeout: int, 
         with err_console.status("", spinner="dots") as live:
             next_poll = 0
             while elapsed < timeout:
-                live.update(f"[#5CD9E6]Polling research {request_id[:8]}... {elapsed}s elapsed[/#5CD9E6]")
+                live.update(f"[#5CD9E6]Polling research {escape(sanitize_control(request_id[:8]))}... {elapsed}s elapsed[/#5CD9E6]")
                 if elapsed >= next_poll:
                     try:
                         response = client.get_research(request_id)
