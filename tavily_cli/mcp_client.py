@@ -53,8 +53,10 @@ def _call_mcp_tool(
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
-        "x-client-source": client_name or "tavily-cli",
+        "x-client-source": "tavily-cli",
     }
+    if client_name:
+        headers["x-client-name"] = client_name
     if session_id:
         # mcp-session-id: respected by the remote MCP's session middleware,
         # preventing its auto-generation so Tavily logs the CLI-scoped session.
