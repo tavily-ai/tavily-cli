@@ -9,7 +9,7 @@ import time
 import click
 from rich.markup import escape
 
-from tavily_cli.common import handle_api_error, json_option, sanitize_control
+from tavily_cli.common import client_name_option, handle_api_error, json_option, sanitize_control
 
 
 class ResearchGroup(click.Group):
@@ -130,6 +130,7 @@ def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
 @click.option("--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
 @click.option("--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
 @click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
+@client_name_option
 @click.pass_context
 def run(
     ctx: click.Context,
@@ -143,6 +144,7 @@ def run(
     poll_interval: int,
     timeout: int,
     json_flag: bool,
+    client_name: str | None,
 ) -> None:
     """Start a research task.
 
@@ -163,7 +165,7 @@ def run(
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
 
     require_api_key_friendly("research")
-    client = get_client()
+    client = get_client(client_name=client_name)
 
     schema = None
     if output_schema:
@@ -272,15 +274,16 @@ def run(
 @research.command()
 @click.argument("request_id")
 @click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
+@client_name_option
 @click.pass_context
-def status(ctx: click.Context, request_id: str, json_flag: bool) -> None:
+def status(ctx: click.Context, request_id: str, json_flag: bool, client_name: str | None) -> None:
     """Check the status of a research task."""
     from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import emit
 
     json_mode = _resolve_json(ctx, json_flag)
     require_api_key_friendly("research status")
-    client = get_client()
+    client = get_client(client_name=client_name)
 
     try:
         response = client.get_research(request_id)
@@ -308,8 +311,17 @@ def status(ctx: click.Context, request_id: str, json_flag: bool) -> None:
 @click.option("--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
 @click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
 @click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
+@client_name_option
 @click.pass_context
-def poll(ctx: click.Context, request_id: str, poll_interval: int, timeout: int, output_file: str | None, json_flag: bool) -> None:
+def poll(
+    ctx: click.Context,
+    request_id: str,
+    poll_interval: int,
+    timeout: int,
+    output_file: str | None,
+    json_flag: bool,
+    client_name: str | None,
+) -> None:
     """Poll a research task until completion and return results."""
     from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import emit, print_research_result
@@ -317,7 +329,7 @@ def poll(ctx: click.Context, request_id: str, poll_interval: int, timeout: int, 
 
     json_mode = _resolve_json(ctx, json_flag)
     require_api_key_friendly("research poll")
-    client = get_client()
+    client = get_client(client_name=client_name)
 
     elapsed = 0
     response = {}

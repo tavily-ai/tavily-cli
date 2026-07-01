@@ -92,6 +92,17 @@ def json_option(func):
     return wrapper
 
 
+def client_name_option(func):
+    """Add a client_name override accepted by the Tavily Python SDK."""
+    return click.option(
+        "--client-name",
+        "--client_name",
+        "client_name",
+        default=None,
+        help="Override the SDK client_name for request attribution.",
+    )(func)
+
+
 # Status codes that represent usage/plan limits rather than real errors.
 _LIMIT_STATUSES = {429, 432}
 

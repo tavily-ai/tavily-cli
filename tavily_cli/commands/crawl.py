@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from tavily_cli.common import handle_api_error, json_option
+from tavily_cli.common import client_name_option, handle_api_error, json_option
 
 
 @click.command()
@@ -25,6 +25,7 @@ from tavily_cli.common import handle_api_error, json_option
 @click.option("--timeout", type=float, default=None, help="Max wait time in seconds (10-150).")
 @click.option("--output", "-o", "output_file", default=None, help="Save JSON output to file.")
 @click.option("--output-dir", default=None, help="Save each page as a .md file in this directory.")
+@client_name_option
 @json_option
 def crawl(
     url: str,
@@ -44,6 +45,7 @@ def crawl(
     timeout: float | None,
     output_file: str | None,
     output_dir: str | None,
+    client_name: str | None,
     json_output: bool,
 ) -> None:
     """Crawl a website starting from URL.
@@ -56,7 +58,7 @@ def crawl(
     from tavily_cli.output import print_crawl_results
 
     require_api_key_friendly("crawl")
-    client = get_client()
+    client = get_client(client_name=client_name)
 
     kwargs: dict = {"url": url}
     if max_depth is not None:

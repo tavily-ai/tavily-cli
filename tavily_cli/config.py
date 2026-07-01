@@ -182,39 +182,44 @@ def get_api_key_or_exit() -> str:
     return key
 
 
-def get_client():
+def get_client(client_name: str | None = None):
     """Return the appropriate Tavily client (SDK or MCP) based on credential type."""
     key = get_api_key_or_exit()
-    return _build_keyed_client(key)
+    return _build_keyed_client(key, client_name=client_name)
 
 
-def _build_keyed_client(key: str):
+def _build_keyed_client(key: str, client_name: str | None = None):
     """Build a keyed Tavily client (SDK or MCP) for the given credential."""
     human_id = get_human_id()
     if is_oauth_token(key):
         from tavily_cli.mcp_client import McpTavilyClient
-        return McpTavilyClient(api_key=key, session_id=SESSION_ID, human_id=human_id)
+        return McpTavilyClient(
+            api_key=key,
+            session_id=SESSION_ID,
+            human_id=human_id,
+            client_name=client_name,
+        )
     from tavily import TavilyClient
     return TavilyClient(
         api_key=key,
         session_id=SESSION_ID,
         human_id=human_id,
-        client_name="tavily-cli",
+        client_name=client_name or "tavily-cli",
         api_base_url=get_api_base_url(),
     )
 
 
-def get_client_or_keyless():
+def get_client_or_keyless(client_name: str | None = None):
     """Return a Tavily client, falling back to keyless mode when no key is set."""
     key = get_api_key()
     if key:
-        return _build_keyed_client(key), False
+        return _build_keyed_client(key, client_name=client_name), False
     from tavily import TavilyClient
     return (
         TavilyClient(
             session_id=SESSION_ID,
             human_id=get_human_id(),
-            client_name="tavily-cli",
+            client_name=client_name or "tavily-cli",
             client_source="tavily-cli-keyless",
             api_base_url=get_api_base_url(),
         ),

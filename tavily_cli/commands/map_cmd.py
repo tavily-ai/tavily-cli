@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from tavily_cli.common import handle_api_error, json_option
+from tavily_cli.common import client_name_option, handle_api_error, json_option
 
 
 @click.command("map")
@@ -20,6 +20,7 @@ from tavily_cli.common import handle_api_error, json_option
 @click.option("--allow-external/--no-external", default=None, help="Include external domain links.")
 @click.option("--timeout", type=float, default=None, help="Max wait time in seconds (10-150).")
 @click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@client_name_option
 @json_option
 def map_urls(
     url: str,
@@ -34,6 +35,7 @@ def map_urls(
     allow_external: bool | None,
     timeout: float | None,
     output_file: str | None,
+    client_name: str | None,
     json_output: bool,
 ) -> None:
     """Discover all URLs on a website (no content extraction).
@@ -46,7 +48,7 @@ def map_urls(
     from tavily_cli.output import print_map_results
 
     require_api_key_friendly("map")
-    client = get_client()
+    client = get_client(client_name=client_name)
 
     kwargs: dict = {"url": url}
     if max_depth is not None:
