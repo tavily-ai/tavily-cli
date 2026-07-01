@@ -93,7 +93,7 @@ tvly search "SEC filings for Apple" --include-domains sec.gov,reuters.com
 tvly search "AI news" --json
 
 # Override SDK client_name for attribution
-tvly search "latest AI news" --client_name x
+tvly search "latest AI news" --client-name x
 ```
 
 ### 4. Extract Content from URLs
@@ -228,7 +228,7 @@ tvly --status --json   # structured status
 | `--include-images` | Include image results |
 | `--chunks-per-source` | Chunks per source (advanced/fast depth only) |
 | `-o` / `--output` | Save output to file |
-| `--client-name` / `--client_name` | Override SDK `client_name` for request attribution |
+| `--client-name` | Override SDK `client_name` for request attribution |
 
 ### `tvly extract`
 
@@ -241,7 +241,7 @@ tvly --status --json   # structured status
 | `--include-images` | Include image URLs |
 | `--timeout` | Max wait (1-60 seconds) |
 | `-o` / `--output` | Save output to file |
-| `--client-name` / `--client_name` | Override SDK `client_name` for request attribution |
+| `--client-name` | Override SDK `client_name` for request attribution |
 
 ### `tvly crawl`
 
@@ -263,7 +263,7 @@ tvly --status --json   # structured status
 | `--timeout` | Max wait (10-150 seconds) |
 | `-o` / `--output` | Save JSON to file |
 | `--output-dir` | Save each page as .md file in directory |
-| `--client-name` / `--client_name` | Override SDK `client_name` for request attribution |
+| `--client-name` | Override SDK `client_name` for request attribution |
 
 ### `tvly map`
 
@@ -278,7 +278,7 @@ tvly --status --json   # structured status
 | `--allow-external` | Include external links |
 | `--timeout` | Max wait (10-150 seconds) |
 | `-o` / `--output` | Save output to file |
-| `--client-name` / `--client_name` | Override SDK `client_name` for request attribution |
+| `--client-name` | Override SDK `client_name` for request attribution |
 
 ### `tvly research <query>` / `tvly research run <query>`
 
@@ -292,15 +292,15 @@ tvly --status --json   # structured status
 | `--poll-interval` | Seconds between checks (default: 10) |
 | `--timeout` | Max wait seconds (default: 600) |
 | `-o` / `--output` | Save output to file |
-| `--client-name` / `--client_name` | Override SDK `client_name` for request attribution |
+| `--client-name` | Override SDK `client_name` for request attribution |
 
 ### `tvly research status`
 
-Check research task status by request ID. Supports `--client-name` / `--client_name`.
+Check research task status by request ID. Supports `--client-name`.
 
 ### `tvly research poll`
 
-Poll until completion and return results. Same `--poll-interval`, `--timeout`, `-o`, and `--client-name` / `--client_name` options as `run`.
+Poll until completion and return results. Same `--poll-interval`, `--timeout`, `-o`, and `--client-name` options as `run`.
 
 ## Environment Variables
 
