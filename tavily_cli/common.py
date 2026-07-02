@@ -93,12 +93,12 @@ def json_option(func):
 
 
 def client_name_option(func):
-    """Add a client_name override accepted by the Tavily Python SDK."""
+    """Add an optional client_name for request attribution."""
     return click.option(
         "--client-name",
         "client_name",
         default=None,
-        help="Override the SDK client_name for request attribution.",
+        help="Set optional client_name for request attribution.",
     )(func)
 
 
