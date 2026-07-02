@@ -204,7 +204,8 @@ def _build_keyed_client(key: str, client_name: str | None = None):
         api_key=key,
         session_id=SESSION_ID,
         human_id=human_id,
-        client_name=client_name or "tavily-cli",
+        client_source="tavily-cli",
+        client_name=client_name,
         api_base_url=get_api_base_url(),
     )
 
@@ -219,8 +220,8 @@ def get_client_or_keyless(client_name: str | None = None):
         TavilyClient(
             session_id=SESSION_ID,
             human_id=get_human_id(),
-            client_name=client_name or "tavily-cli",
             client_source="tavily-cli-keyless",
+            client_name=client_name,
             api_base_url=get_api_base_url(),
         ),
         True,
