@@ -8,7 +8,7 @@ import click
 
 from tavily import TavilyKeylessLimitError
 
-from tavily_cli.common import handle_api_error, handle_keyless_cap_hit, json_option
+from tavily_cli.common import client_name_option, handle_api_error, handle_keyless_cap_hit, json_option
 
 
 @click.command()
@@ -28,6 +28,7 @@ from tavily_cli.common import handle_api_error, handle_keyless_cap_hit, json_opt
 @click.option("--include-image-descriptions", is_flag=True, default=False, help="Include AI image descriptions.")
 @click.option("--chunks-per-source", type=int, default=None, help="Chunks per source (advanced/fast depth only).")
 @click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@client_name_option
 @json_option
 def search(
     query: str | None,
@@ -46,6 +47,7 @@ def search(
     include_image_descriptions: bool,
     chunks_per_source: int | None,
     output_file: str | None,
+    client_name: str | None,
     json_output: bool,
 ) -> None:
     """Search the web using Tavily.
@@ -63,7 +65,7 @@ def search(
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
 
-    client, _is_keyless = get_client_or_keyless()
+    client, _is_keyless = get_client_or_keyless(client_name=client_name)
 
     kwargs: dict = {"query": query}
     if search_depth is not None:

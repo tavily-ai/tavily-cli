@@ -92,6 +92,16 @@ def json_option(func):
     return wrapper
 
 
+def client_name_option(func):
+    """Add an optional client_name for request attribution."""
+    return click.option(
+        "--client-name",
+        "client_name",
+        default=None,
+        help="Set optional client_name for request attribution.",
+    )(func)
+
+
 # Status codes that represent usage/plan limits rather than real errors.
 _LIMIT_STATUSES = {429, 432}
 

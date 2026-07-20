@@ -36,6 +36,7 @@ def _call_mcp_tool(
     arguments: dict,
     session_id: str | None = None,
     human_id: str | None = None,
+    client_name: str | None = None,
 ) -> dict:
     """Call a Tavily MCP tool via JSON-RPC and return the parsed result."""
     request_body = {
@@ -54,6 +55,8 @@ def _call_mcp_tool(
         "Accept": "application/json, text/event-stream",
         "x-client-source": "tavily-cli",
     }
+    if client_name:
+        headers["x-client-name"] = client_name
     if session_id:
         # mcp-session-id: respected by the remote MCP's session middleware,
         # preventing its auto-generation so Tavily logs the CLI-scoped session.
@@ -114,10 +117,12 @@ class McpTavilyClient:
         api_key: str,
         session_id: str | None = None,
         human_id: str | None = None,
+        client_name: str | None = None,
     ) -> None:
         self._token = api_key
         self._session_id = session_id
         self._human_id = human_id
+        self._client_name = client_name
 
     def _call(self, tool_name: str, arguments: dict) -> dict:
         return _call_mcp_tool(
@@ -126,6 +131,7 @@ class McpTavilyClient:
             arguments,
             session_id=self._session_id,
             human_id=self._human_id,
+            client_name=self._client_name,
         )
 
     def search(self, **kwargs: Any) -> dict:
