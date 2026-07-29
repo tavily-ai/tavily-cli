@@ -7,14 +7,88 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
+import psutil
+
 CONFIG_DIR = Path.home() / ".tavily"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+_SESSION_FILE = CONFIG_DIR / "session.json"
 
 MCP_AUTH_DIR = Path.home() / ".mcp-auth"
 
-# One session per CLI invocation. Module-level: generated on first import,
-# reused across all commands within a single `tvly` run.
-SESSION_ID = uuid4().hex
+
+def _pid_alive(pid: int) -> bool:
+    """Check if a process is still running."""
+    return psutil.pid_exists(pid)
+
+
+def _get_grandparent_pid() -> int | None:
+    """Get the grandparent PID (parent of parent)."""
+    try:
+        return psutil.Process(os.getppid()).ppid()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+        return None
+
+
+def _get_session_id() -> str:
+    """Return a stable session ID for the current terminal or agent session.
+
+    Matches on PPID first (terminal users), then grandparent PID (agents
+    like Claude Code that spawn a new shell per command).
+    """
+    ppid = os.getppid()
+    gppid = _get_grandparent_pid()
+
+    # Read existing sessions
+    sessions: list[dict] = []
+    if _SESSION_FILE.exists():
+        try:
+            data = json.loads(_SESSION_FILE.read_text())
+            sessions = data.get("sessions", [])
+        except (json.JSONDecodeError, OSError):
+            sessions = []
+
+    # 1. Match by PPID (terminal user — same shell every time)
+    for entry in sessions:
+        if entry.get("ppid") == ppid:
+            return entry["session_id"]
+
+    # 2. Match by grandparent PID (agent — PPID changes, grandparent stable)
+    if gppid is not None:
+        for entry in sessions:
+            if entry.get("grandparent_pid") == gppid and _pid_alive(gppid):
+                # Update PPID for this session
+                entry["ppid"] = ppid
+                _write_sessions(sessions)
+                return entry["session_id"]
+
+    # 3. No match — new session. Prune dead entries first.
+    alive = [
+        e for e in sessions
+        if _pid_alive(e.get("ppid", -1)) or _pid_alive(e.get("grandparent_pid", -1))
+    ]
+
+    new_id = uuid4().hex
+    alive.append({
+        "session_id": new_id,
+        "ppid": ppid,
+        "grandparent_pid": gppid,
+    })
+
+    _write_sessions(alive)
+    return new_id
+
+
+def _write_sessions(sessions: list[dict]) -> None:
+    """Persist session entries to disk."""
+    old_umask = os.umask(0o077)
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        _SESSION_FILE.write_text(json.dumps({"sessions": sessions}, indent=2) + "\n")
+    finally:
+        os.umask(old_umask)
+
+
+SESSION_ID = _get_session_id()
 
 
 def _read_config() -> dict:
