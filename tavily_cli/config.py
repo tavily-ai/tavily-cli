@@ -73,7 +73,10 @@ def _write_sessions(sessions: dict[str, str]) -> None:
         os.umask(old_umask)
 
 
-SESSION_ID = _get_session_id()
+try:
+    SESSION_ID = _get_session_id()
+except Exception:
+    SESSION_ID = uuid4().hex
 
 
 def _read_config() -> dict:
