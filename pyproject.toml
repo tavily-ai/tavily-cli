@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tavily-cli"
-version = "0.1.5"
+version = "0.1.6"
 description = "CLI and agent tools for the Tavily API — search, extract, crawl, map, and research from the command line."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,6 +34,7 @@ dependencies = [
     "requests>=2.32.4",
     "urllib3>=2.2.2",
     "certifi>=2024.7.4",
+    "psutil>=5.9.0",
 ]
 
 [project.urls]

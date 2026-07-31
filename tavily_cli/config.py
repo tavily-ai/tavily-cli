@@ -7,14 +7,73 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
+import psutil
+
 CONFIG_DIR = Path.home() / ".tavily"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+_SESSION_FILE = CONFIG_DIR / "session.json"
 
 MCP_AUTH_DIR = Path.home() / ".mcp-auth"
 
-# One session per CLI invocation. Module-level: generated on first import,
-# reused across all commands within a single `tvly` run.
-SESSION_ID = uuid4().hex
+
+def _pid_alive(pid: int) -> bool:
+    """Check if a process is still running."""
+    return psutil.pid_exists(pid)
+
+
+def _get_grandparent_pid() -> int | None:
+    """Get the grandparent PID (parent of parent)."""
+    try:
+        return psutil.Process(os.getppid()).ppid()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+        return None
+
+
+def _get_session_id() -> str:
+    """Return a stable session ID for the current terminal or agent session.
+
+    Matches on PPID first (terminal users), then grandparent PID (agents
+    like Claude Code that spawn a new shell per command).
+    """
+    ppid = str(os.getppid())
+    gppid = _get_grandparent_pid()
+    gppid_str = str(gppid) if gppid is not None else None
+
+    sessions: dict[str, str] = {}
+    if _SESSION_FILE.exists():
+        try:
+            sessions = json.loads(_SESSION_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            sessions = {}
+
+    if ppid in sessions:
+        return sessions[ppid]
+
+    if gppid_str is not None and gppid_str in sessions and _pid_alive(gppid):
+        return sessions[gppid_str]
+
+    alive = {pid: sid for pid, sid in sessions.items() if _pid_alive(int(pid))}
+
+    new_id = uuid4().hex
+    alive[ppid] = new_id
+    if gppid_str is not None:
+        alive[gppid_str] = new_id
+
+    _write_sessions(alive)
+    return new_id
+
+
+def _write_sessions(sessions: dict[str, str]) -> None:
+    """Persist session entries to disk."""
+    old_umask = os.umask(0o077)
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        _SESSION_FILE.write_text(json.dumps(sessions, indent=2) + "\n")
+    finally:
+        os.umask(old_umask)
+
+
+SESSION_ID = _get_session_id()
 
 
 def _read_config() -> dict:
