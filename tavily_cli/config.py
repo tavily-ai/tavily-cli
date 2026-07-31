@@ -35,55 +35,40 @@ def _get_session_id() -> str:
     Matches on PPID first (terminal users), then grandparent PID (agents
     like Claude Code that spawn a new shell per command).
     """
-    ppid = os.getppid()
+    ppid = str(os.getppid())
     gppid = _get_grandparent_pid()
+    gppid_str = str(gppid) if gppid is not None else None
 
-    # Read existing sessions
-    sessions: list[dict] = []
+    sessions: dict[str, str] = {}
     if _SESSION_FILE.exists():
         try:
-            data = json.loads(_SESSION_FILE.read_text())
-            sessions = data.get("sessions", [])
+            sessions = json.loads(_SESSION_FILE.read_text())
         except (json.JSONDecodeError, OSError):
-            sessions = []
+            sessions = {}
 
-    # 1. Match by PPID (terminal user — same shell every time)
-    for entry in sessions:
-        if entry.get("ppid") == ppid:
-            return entry["session_id"]
+    if ppid in sessions:
+        return sessions[ppid]
 
-    # 2. Match by grandparent PID (agent — PPID changes, grandparent stable)
-    if gppid is not None:
-        for entry in sessions:
-            if entry.get("grandparent_pid") == gppid and _pid_alive(gppid):
-                # Update PPID for this session
-                entry["ppid"] = ppid
-                _write_sessions(sessions)
-                return entry["session_id"]
+    if gppid_str is not None and gppid_str in sessions and _pid_alive(gppid):
+        return sessions[gppid_str]
 
-    # 3. No match — new session. Prune dead entries first.
-    alive = [
-        e for e in sessions
-        if _pid_alive(e.get("ppid", -1)) or _pid_alive(e.get("grandparent_pid", -1))
-    ]
+    alive = {pid: sid for pid, sid in sessions.items() if _pid_alive(int(pid))}
 
     new_id = uuid4().hex
-    alive.append({
-        "session_id": new_id,
-        "ppid": ppid,
-        "grandparent_pid": gppid,
-    })
+    alive[ppid] = new_id
+    if gppid_str is not None:
+        alive[gppid_str] = new_id
 
     _write_sessions(alive)
     return new_id
 
 
-def _write_sessions(sessions: list[dict]) -> None:
+def _write_sessions(sessions: dict[str, str]) -> None:
     """Persist session entries to disk."""
     old_umask = os.umask(0o077)
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        _SESSION_FILE.write_text(json.dumps({"sessions": sessions}, indent=2) + "\n")
+        _SESSION_FILE.write_text(json.dumps(sessions, indent=2) + "\n")
     finally:
         os.umask(old_umask)
 
