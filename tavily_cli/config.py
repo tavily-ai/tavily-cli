@@ -102,7 +102,35 @@ def _write_config(data: dict) -> None:
 def save_api_key(api_key: str) -> None:
     config = _read_config()
     config["api_key"] = api_key
+    config.pop("oauth", None)
     _write_config(config)
+
+
+def save_oauth_session(session) -> None:
+    """Persist OAuth tokens and the dynamically registered client in config.json."""
+    from tavily_cli.oauth import OAuthSession
+
+    if not isinstance(session, OAuthSession):
+        raise TypeError("session must be an OAuthSession")
+    config = _read_config()
+    config.pop("api_key", None)
+    config["oauth"] = {
+        "access_token": session.tokens.access_token,
+        "refresh_token": session.tokens.refresh_token,
+        "expires_at": session.tokens.expires_at,
+        "token_type": session.tokens.token_type,
+        "client_id": session.client.client_id,
+        "client_secret": session.client.client_secret,
+        "token_endpoint_auth_method": session.client.token_endpoint_auth_method,
+        "redirect_uri": session.client.redirect_uri,
+    }
+    _write_config(config)
+
+
+def has_stored_oauth() -> bool:
+    """True when ~/.tavily/config.json holds a native OAuth session."""
+    data = _read_config().get("oauth")
+    return isinstance(data, dict) and isinstance(data.get("access_token"), str)
 
 
 def get_human_id() -> str | None:
@@ -126,8 +154,17 @@ def get_api_base_url() -> str | None:
 
 
 def clear_credentials() -> None:
+    oauth = _read_config().get("oauth")
+    if isinstance(oauth, dict):
+        _revoke_stored_oauth(oauth)
     if CONFIG_FILE.exists():
-        CONFIG_FILE.unlink()
+        config = _read_config()
+        config.pop("api_key", None)
+        config.pop("oauth", None)
+        if config:
+            _write_config(config)
+        else:
+            CONFIG_FILE.unlink()
     _clear_mcp_tokens()
 
 
@@ -205,8 +242,69 @@ def _clear_mcp_tokens() -> None:
                 pass
 
 
+def _oauth_client_from_dict(data: dict):
+    from tavily_cli.oauth import RegisteredClient
+
+    client_id = data.get("client_id")
+    if not isinstance(client_id, str) or not client_id:
+        return None
+    return RegisteredClient(
+        client_id=client_id,
+        client_secret=data.get("client_secret") if isinstance(data.get("client_secret"), str) else None,
+        token_endpoint_auth_method=data.get("token_endpoint_auth_method") or "none",
+        redirect_uri=data.get("redirect_uri") or "http://127.0.0.1/callback",
+    )
+
+
+def _revoke_stored_oauth(data: dict) -> None:
+    """Best-effort token revocation. Never raises — logout must still clear disk."""
+    from tavily_cli.oauth import fetch_metadata, revoke_token
+
+    client = _oauth_client_from_dict(data)
+    if client is None:
+        return
+    try:
+        metadata = fetch_metadata()
+        for key in ("access_token", "refresh_token"):
+            token = data.get(key)
+            if isinstance(token, str) and token:
+                revoke_token(metadata, client, token)
+    except Exception:
+        return
+
+
+def _get_oauth_access_token(config: dict) -> str | None:
+    """Return a usable OAuth access token from config, refreshing if needed."""
+    from tavily_cli.oauth import (
+        OAuthSession,
+        fetch_metadata,
+        refresh_tokens,
+        token_is_expired,
+    )
+
+    data = config.get("oauth")
+    if not isinstance(data, dict):
+        return None
+    access = data.get("access_token")
+    if not isinstance(access, str) or not access:
+        return None
+    if not token_is_expired(data.get("expires_at")):
+        return access
+
+    refresh = data.get("refresh_token")
+    client = _oauth_client_from_dict(data)
+    if not isinstance(refresh, str) or not refresh or client is None:
+        return None
+    try:
+        tokens = refresh_tokens(fetch_metadata(), client, refresh)
+        save_oauth_session(OAuthSession(tokens=tokens, client=client))
+        return tokens.access_token
+    except Exception:
+        return None
+
+
 def get_api_key() -> str | None:
-    """Resolve the API key with precedence: env var > config file > MCP OAuth token."""
+    """Resolve credentials: env var > API key in config > OAuth in config > legacy ~/.mcp-auth."""
     key = os.environ.get("TAVILY_API_KEY")
     if key:
         return key
@@ -215,6 +313,10 @@ def get_api_key() -> str | None:
     key = config.get("api_key")
     if key:
         return key
+
+    token = _get_oauth_access_token(config)
+    if token:
+        return token
 
     return _get_mcp_token()
 
@@ -306,7 +408,7 @@ def require_api_key_friendly(command_name: str) -> str:
     )
     console.print()
     console.print("  Sign up for a free key at [link=https://tavily.com]https://tavily.com[/link]")
-    console.print("  Then run [#9BC0AE]tvly login --api-key tvly-YOUR_KEY[/#9BC0AE]")
+    console.print("  Then run [#9BC0AE]tvly login[/#9BC0AE] or [#9BC0AE]tvly login --api-key tvly-YOUR_KEY[/#9BC0AE]")
     console.print()
     console.print(
         "  [dim]Tip: [#9BC0AE]tvly search[/#9BC0AE] and [#9BC0AE]tvly extract[/#9BC0AE] "

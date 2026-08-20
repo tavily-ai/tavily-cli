@@ -49,14 +49,17 @@ tvly extract https://example.com
 ### 1. Authenticate
 
 ```bash
-# Set API key directly
+# Browser OAuth (no Node.js required)
+tvly login
+
+# Headless / SSH: print the URL instead of opening a browser
+tvly login --no-browser
+
+# Or set API key directly
 tvly login --api-key tvly-YOUR_KEY
 
 # Or use environment variable
 export TAVILY_API_KEY=tvly-YOUR_KEY
-
-# Or OAuth (opens browser)
-tvly login
 
 # Check auth status
 tvly auth
