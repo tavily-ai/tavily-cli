@@ -11,6 +11,7 @@ from tavily_cli.commands.extract import extract
 from tavily_cli.commands.map_cmd import map_urls
 from tavily_cli.commands.research import research
 from tavily_cli.commands.search import search
+from tavily_cli.commands.update import update_command
 
 
 @click.group(invoke_without_command=True)
@@ -147,6 +148,7 @@ cli.add_command(extract)
 cli.add_command(crawl)
 cli.add_command(map_urls)
 cli.add_command(research)
+cli.add_command(update_command)
 
 
 def main() -> None:

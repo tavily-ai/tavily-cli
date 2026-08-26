@@ -1,0 +1,260 @@
+"""Check for and install Tavily CLI updates."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import site
+import subprocess
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from importlib import metadata
+from pathlib import Path
+
+import click
+import httpx
+from packaging.version import InvalidVersion, Version
+
+from tavily_cli import __version__
+from tavily_cli.common import json_option, sanitize_control
+
+PACKAGE_NAME = "tavily-cli"
+PYPI_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
+
+
+@dataclass(frozen=True)
+class InstallInfo:
+    """The package manager responsible for the active CLI installation."""
+
+    method: str
+    command: tuple[str, ...] | None
+    environment: tuple[tuple[str, str], ...] = ()
+
+
+@click.command("update")
+@click.option("--check", "check_only", is_flag=True, help="Check for an update without installing it.")
+@json_option
+def update_command(check_only: bool, json_output: bool) -> None:
+    """Check for or install the latest Tavily CLI release."""
+    try:
+        latest = fetch_latest_version()
+        update_available = _is_newer(latest, __version__)
+    except Exception as exc:
+        _fail("check", str(exc), 4, json_output)
+        return
+    try:
+        install = detect_install()
+    except Exception as exc:
+        _fail("install_method", str(exc), 1, json_output)
+        return
+
+    if check_only or not update_available:
+        result = _result(
+            current=__version__,
+            latest=latest,
+            install=install,
+            updated=False,
+        )
+        _print_result(result, json_output=json_output, check_only=check_only)
+        return
+
+    if install.command is None:
+        message = _unsupported_install_message(install.method)
+        _fail("install_method", message, 1, json_output)
+        return
+
+    if not json_output:
+        click.echo(f"Updating Tavily CLI via {install.method}...")
+
+    process_environment = os.environ.copy()
+    process_environment.update(install.environment)
+    try:
+        completed = subprocess.run(
+            install.command,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+            env=process_environment,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        _fail("update", str(exc), 1, json_output)
+        return
+
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or f"Exited with status {completed.returncode}."
+        _fail("update", detail[-2000:], 1, json_output)
+        return
+
+    try:
+        current = _installed_version()
+        if _is_newer(latest, current):
+            raise RuntimeError(
+                f"The package manager completed, but Tavily CLI is still {current}; latest is {latest}. "
+                "The installation may be pinned."
+            )
+    except Exception as exc:
+        _fail("verify", str(exc), 1, json_output)
+        return
+    result = _result(
+        current=current,
+        latest=latest,
+        install=install,
+        updated=Version(current) != Version(__version__),
+    )
+    _print_result(result, json_output=json_output, check_only=False)
+
+
+def fetch_latest_version(*, client: httpx.Client | None = None) -> str:
+    """Return the latest stable Tavily CLI version published on PyPI."""
+    http = client or httpx.Client(timeout=10.0, follow_redirects=True)
+    close = client is None
+    try:
+        response = http.get(PYPI_URL)
+        response.raise_for_status()
+        data = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise RuntimeError("Could not check PyPI for Tavily CLI updates.") from exc
+    finally:
+        if close:
+            http.close()
+
+    info = data.get("info") if isinstance(data, dict) else None
+    latest = info.get("version") if isinstance(info, dict) else None
+    if not isinstance(latest, str):
+        raise RuntimeError("PyPI returned an invalid Tavily CLI release response.")
+    try:
+        Version(latest)
+    except InvalidVersion as exc:
+        raise RuntimeError("PyPI returned an invalid Tavily CLI version.") from exc
+    return latest
+
+
+def detect_install(
+    *,
+    distribution: metadata.Distribution | None = None,
+    executable: Path | None = None,
+    prefix: Path | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+) -> InstallInfo:
+    """Detect the manager for the active package without changing the environment."""
+    dist = distribution or metadata.distribution(PACKAGE_NAME)
+    # Keep the venv executable path intact. Resolving its symlink can point pip
+    # at the base interpreter and update the wrong environment.
+    python = (executable or Path(sys.executable)).absolute()
+    environment = (prefix or Path(sys.prefix)).resolve()
+
+    if _is_source_install(dist):
+        return InstallInfo("source", None)
+
+    path = f"{python.as_posix()}:{environment.as_posix()}".lower()
+    if (environment / "pipx_metadata.json").is_file() or "/pipx/venvs/" in path:
+        pipx = which("pipx")
+        manager_environment: tuple[tuple[str, str], ...] = ()
+        if environment.parent.name.lower() == "venvs":
+            manager_environment = (("PIPX_HOME", str(environment.parent.parent)),)
+        return InstallInfo("pipx", (pipx, "upgrade", PACKAGE_NAME) if pipx else None, manager_environment)
+
+    if (environment / "uv-receipt.toml").is_file() or "/uv/tools/" in path:
+        uv = which("uv")
+        manager_environment = (("UV_TOOL_DIR", str(environment.parent)),)
+        return InstallInfo("uv", (uv, "tool", "upgrade", PACKAGE_NAME) if uv else None, manager_environment)
+
+    installer = (dist.read_text("INSTALLER") or "").strip().lower()
+    if installer == "uv":
+        uv = which("uv")
+        command = (uv, "pip", "install", "--python", str(python), "--upgrade", PACKAGE_NAME) if uv else None
+        return InstallInfo("uv", command)
+    if installer in {"pip", "pip3"}:
+        command = [str(python), "-m", "pip", "install", "--upgrade", PACKAGE_NAME]
+        if _is_user_install(dist):
+            command.insert(-2, "--user")
+        return InstallInfo("pip", tuple(command))
+    return InstallInfo("unknown", None)
+
+
+def _is_source_install(distribution: metadata.Distribution) -> bool:
+    raw = distribution.read_text("direct_url.json")
+    if not raw:
+        return False
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    # PyPI installs do not have direct_url.json. Editable, VCS, local archive,
+    # and other direct-URL installs do; preserve that provenance instead of
+    # silently replacing it with a registry release.
+    return isinstance(data.get("url"), str)
+
+
+def _is_user_install(distribution: metadata.Distribution) -> bool:
+    try:
+        package_root = Path(distribution.locate_file("")).resolve()
+        user_root = Path(site.getusersitepackages()).resolve()
+        return package_root == user_root or user_root in package_root.parents
+    except (AttributeError, OSError, RuntimeError):
+        return False
+
+
+def _is_newer(candidate: str, current: str) -> bool:
+    try:
+        return Version(candidate) > Version(current)
+    except InvalidVersion as exc:
+        raise RuntimeError("The installed Tavily CLI version is invalid.") from exc
+
+
+def _installed_version() -> str:
+    return metadata.version(PACKAGE_NAME)
+
+
+def _unsupported_install_message(method: str) -> str:
+    if method == "source":
+        return "This is a source or direct-URL installation. Update it from its original source."
+    if method in {"uv", "pipx"}:
+        return f"This installation is managed by {method}, but {method} is not available on PATH."
+    return "Could not determine how Tavily CLI was installed. Update it with the original package manager."
+
+
+def _result(*, current: str, latest: str, install: InstallInfo, updated: bool) -> dict[str, object]:
+    return {
+        "ok": True,
+        "current_version": current,
+        "latest_version": latest,
+        "update_available": _is_newer(latest, current),
+        "install_method": install.method,
+        "updated": updated,
+    }
+
+
+def _fail(stage: str, message: str, exit_code: int, json_output: bool) -> None:
+    safe_message = sanitize_control(message)
+    if json_output:
+        click.echo(json.dumps({"ok": False, "error": {"stage": stage, "message": safe_message}}, sort_keys=True))
+    else:
+        from rich.markup import escape
+
+        from tavily_cli.theme import err_console
+
+        err_console.print(f"  [#FAA2FB]> Update failed:[/#FAA2FB] {escape(safe_message)}")
+    raise click.exceptions.Exit(exit_code)
+
+
+def _print_result(result: dict[str, object], *, json_output: bool, check_only: bool) -> None:
+    if json_output:
+        click.echo(json.dumps(result, sort_keys=True))
+        return
+
+    current = result["current_version"]
+    latest = result["latest_version"]
+    if result["updated"]:
+        click.echo(f"Updated Tavily CLI: {__version__} -> {current}")
+    elif result["update_available"]:
+        click.echo(f"Tavily CLI update available: {current} -> {latest}")
+        if check_only:
+            click.echo("Run `tvly update` to install it.")
+    else:
+        click.echo(f"Tavily CLI {current} is up to date.")
