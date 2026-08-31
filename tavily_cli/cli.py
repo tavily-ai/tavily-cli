@@ -8,6 +8,7 @@ from tavily_cli import __version__
 from tavily_cli.commands.auth import auth_status, login, logout
 from tavily_cli.commands.crawl import crawl
 from tavily_cli.commands.extract import extract
+from tavily_cli.commands.feedback import feedback
 from tavily_cli.commands.map_cmd import map_urls
 from tavily_cli.commands.research import research
 from tavily_cli.commands.search import search
@@ -147,6 +148,7 @@ cli.add_command(extract)
 cli.add_command(crawl)
 cli.add_command(map_urls)
 cli.add_command(research)
+cli.add_command(feedback)
 
 
 def main() -> None:

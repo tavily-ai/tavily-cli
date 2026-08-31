@@ -323,6 +323,22 @@ def print_map_results(data: dict, *, json_mode: bool, output_file: str | None = 
 
 
 # ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+
+def print_feedback_result(data: dict, *, json_mode: bool) -> None:
+    if json_mode:
+        emit(data, json_mode=True, pretty=True)
+        return
+
+    feedback_id = data.get("feedback_id", "")
+    console.print("  [#9BC0AE]>[/#9BC0AE] Feedback submitted", _safe_text(f" (feedback_id: {feedback_id})", style="dim"))
+
+    response_time = data.get("response_time")
+    _footer("Feedback", 1, "submitted", response_time)
+
+
+# ---------------------------------------------------------------------------
 # Research
 # ---------------------------------------------------------------------------
 

@@ -38,7 +38,7 @@ pip install -e .
 `tvly search` and `tvly extract` work without an API key — try them right
 after installing. A fair-use rate-limit cap applies; when reached, the CLI
 prints a clear message with sign-up and continuation options. All other
-commands (`crawl`, `map`, `research`) require a key.
+commands (`crawl`, `map`, `research`, `feedback`) require a key.
 
 ```bash
 pip install tavily-cli
@@ -156,6 +156,17 @@ tvly research poll <request_id> --json        # wait and get result
 tvly research "AI market size" --output-schema schema.json --json
 ```
 
+### 8. Submit Feedback
+
+```bash
+# Score a search request overall and per result
+tvly feedback --request-id <request_id> --agent-score 0.9 \
+  --urls-scores '[{"id": "r1", "agent_score": 0.9}, {"id": "r2", "agent_score": 0.2, "comment": "outdated"}]'
+
+# Feedback on a whole session, with the answer you produced
+tvly feedback --session-id <session_id> --agent-score 1 --response-delivered "..." --used-ids '["r1", "r3"]'
+```
+
 ## CLI Overview
 
 ```
@@ -168,10 +179,11 @@ tvly
 ├── extract <urls...>           # Extract content from URLs
 ├── crawl <url>                 # Crawl a website
 ├── map <url>                   # Discover URLs (no content)
-└── research <query>            # Deep research (async)
-    ├── run <query>             # Start a research task (same as above)
-    ├── status <id>             # Check task status
-    └── poll <id>               # Poll until completion
+├── research <query>            # Deep research (async)
+│   ├── run <query>             # Start a research task (same as above)
+│   ├── status <id>             # Check task status
+│   └── poll <id>               # Poll until completion
+└── feedback                    # Submit feedback on a request or session
 ```
 
 ## Non-Interactive Mode (for AI Agents & Scripts)
@@ -301,6 +313,25 @@ Check research task status by request ID. Supports `--client-name`.
 ### `tvly research poll`
 
 Poll until completion and return results. Same `--poll-interval`, `--timeout`, `-o`, and `--client-name` options as `run`.
+
+### `tvly feedback`
+
+Requires `--session-id` or `--request-id`. Requires a Tavily API key.
+
+| Option | Description |
+|--------|-------------|
+| `--session-id` | Session to give feedback on |
+| `--request-id` | Search request to give feedback on |
+| `--agent-score` | Overall score: 1 perfect, 0 irrelevant, -1 harmful |
+| `--human-score` | End-user feedback, if available (e.g. like/dislike) |
+| `--comment` | Explanation, required when `--agent-score` is below 0.5 |
+| `--response-delivered` | The final answer you produced using the results |
+| `--used-urls` | URLs you actually used: JSON array of strings, inline or a file path |
+| `--used-ids` | Result IDs you actually used: JSON array of strings, inline or a file path |
+| `--used-citations` | Content snippets you used: JSON array of strings, inline or a file path |
+| `--urls-scores` | Per-result feedback: JSON array of `{id\|url, agent_score, scores, comment}`, inline or a file path |
+| `--extra-scores` | Additional labeled scores: JSON array of `{label, value}`, inline or a file path |
+| `--client-name` | Set optional `client_name` for request attribution |
 
 ## Environment Variables
 
