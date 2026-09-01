@@ -39,6 +39,17 @@ class FakeDistribution:
         return self.root / path
 
 
+def expose_entrypoint(environment: Path, bin_dir: Path, *, name: str = "tvly") -> Path:
+    target = environment / "bin" / "tvly"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("")
+    target.chmod(0o755)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    entrypoint = bin_dir / name
+    entrypoint.symlink_to(target)
+    return entrypoint
+
+
 def test_fetch_latest_version_from_pypi() -> None:
     transport = httpx.MockTransport(
         lambda request: httpx.Response(200, json={"info": {"version": "1.2.3"}}, request=request)
@@ -61,7 +72,10 @@ def test_fetch_latest_version_rejects_invalid_response() -> None:
             Path("/home/user/.local/share/uv/tools/tavily-cli/bin/python"),
             "uv",
             ("/usr/bin/uv", "tool", "upgrade", "tavily-cli"),
-            (("UV_TOOL_DIR", str(Path("/home/user/.local/share/uv/tools").resolve())),),
+            (
+                ("UV_TOOL_DIR", str(Path("/home/user/.local/share/uv/tools").resolve())),
+                ("UV_TOOL_BIN_DIR", "/home/user/.local/bin"),
+            ),
         ),
         (
             FakeDistribution(installer="uv"),
@@ -83,7 +97,10 @@ def test_fetch_latest_version_rejects_invalid_response() -> None:
             Path("/home/user/.local/pipx/venvs/tavily-cli/bin/python"),
             "pipx",
             ("/usr/bin/pipx", "upgrade", "tavily-cli"),
-            (("PIPX_HOME", str(Path("/home/user/.local/pipx").resolve())),),
+            (
+                ("PIPX_HOME", str(Path("/home/user/.local/pipx").resolve())),
+                ("PIPX_BIN_DIR", "/home/user/.local/bin"),
+            ),
         ),
         (
             FakeDistribution(),
@@ -105,6 +122,10 @@ def test_detect_install_managers(
         distribution=distribution,  # type: ignore[arg-type]
         executable=executable,
         prefix=executable.parent.parent,
+        process_environment={
+            "PIPX_BIN_DIR": "/home/user/.local/bin",
+            "UV_TOOL_BIN_DIR": "/home/user/.local/bin",
+        },
         which=lambda command: f"/usr/bin/{command}",
     )
 
@@ -176,18 +197,22 @@ def test_detect_uv_receipt_preserves_custom_tool_dir(tmp_path: Path) -> None:
     environment = tool_dir / "tavily-cli"
     environment.mkdir(parents=True)
     (environment / "uv-receipt.toml").write_text("")
+    bin_dir = tmp_path / "custom-bin"
+    entrypoint = expose_entrypoint(environment, bin_dir)
 
     detected = detect_install(
         distribution=FakeDistribution(),  # type: ignore[arg-type]
         executable=environment / "bin" / "python",
         prefix=environment,
+        entrypoint=entrypoint,
+        process_environment={},
         which=lambda command: f"/tools/{command}",
     )
 
     assert detected == InstallInfo(
         "uv",
         ("/tools/uv", "tool", "upgrade", "tavily-cli"),
-        (("UV_TOOL_DIR", str(tool_dir)),),
+        (("UV_TOOL_DIR", str(tool_dir)), ("UV_TOOL_BIN_DIR", str(bin_dir))),
     )
 
 
@@ -196,18 +221,48 @@ def test_detect_pipx_receipt_preserves_custom_home(tmp_path: Path) -> None:
     environment = pipx_home / "venvs" / "tavily-cli"
     environment.mkdir(parents=True)
     (environment / "pipx_metadata.json").write_text("")
+    bin_dir = tmp_path / "custom-bin"
+    entrypoint = expose_entrypoint(environment, bin_dir)
 
     detected = detect_install(
         distribution=FakeDistribution(),  # type: ignore[arg-type]
         executable=environment / "bin" / "python",
         prefix=environment,
+        entrypoint=entrypoint,
+        process_environment={},
         which=lambda command: f"/tools/{command}",
     )
 
     assert detected == InstallInfo(
         "pipx",
         ("/tools/pipx", "upgrade", "tavily-cli"),
-        (("PIPX_HOME", str(pipx_home)),),
+        (("PIPX_HOME", str(pipx_home)), ("PIPX_BIN_DIR", str(bin_dir))),
+    )
+
+
+def test_detect_pipx_recovers_invoked_entrypoint_from_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pipx_home = tmp_path / "custom-pipx"
+    environment = pipx_home / "venvs" / "tavily-cli"
+    environment.mkdir(parents=True)
+    (environment / "pipx_metadata.json").write_text("")
+    bin_dir = tmp_path / "custom-bin"
+    expose_entrypoint(environment, bin_dir)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setattr(update_module.sys, "argv", ["tvly"])
+
+    detected = detect_install(
+        distribution=FakeDistribution(),  # type: ignore[arg-type]
+        executable=environment / "bin" / "python",
+        prefix=environment,
+        process_environment={},
+        which=lambda command: f"/tools/{command}",
+    )
+
+    assert detected.environment == (
+        ("PIPX_HOME", str(pipx_home)),
+        ("PIPX_BIN_DIR", str(bin_dir)),
     )
 
 
@@ -216,19 +271,57 @@ def test_detect_pipx_suffixed_install_uses_active_environment_name(tmp_path: Pat
     environment = pipx_home / "venvs" / "tavily-cli-old"
     environment.mkdir(parents=True)
     (environment / "pipx_metadata.json").write_text("")
+    bin_dir = tmp_path / "custom-bin"
+    entrypoint = expose_entrypoint(environment, bin_dir, name="tvly-old")
 
     detected = detect_install(
         distribution=FakeDistribution(),  # type: ignore[arg-type]
         executable=environment / "bin" / "python",
         prefix=environment,
+        entrypoint=entrypoint,
+        process_environment={},
         which=lambda command: f"/tools/{command}",
     )
 
     assert detected == InstallInfo(
         "pipx",
         ("/tools/pipx", "upgrade", "tavily-cli-old"),
-        (("PIPX_HOME", str(pipx_home)),),
+        (("PIPX_HOME", str(pipx_home)), ("PIPX_BIN_DIR", str(bin_dir))),
     )
+
+
+@pytest.mark.parametrize(
+    ("environment_parts", "receipt", "variable"),
+    [
+        (("custom-pipx", "venvs", "tavily-cli"), "pipx_metadata.json", "PIPX_BIN_DIR"),
+        (("custom-uv", "tavily-cli"), "uv-receipt.toml", "UV_TOOL_BIN_DIR"),
+    ],
+)
+def test_detect_manager_refuses_unverified_binary_directory(
+    tmp_path: Path,
+    environment_parts: tuple[str, ...],
+    receipt: str,
+    variable: str,
+) -> None:
+    environment = tmp_path.joinpath(*environment_parts)
+    environment.mkdir(parents=True)
+    (environment / receipt).write_text("")
+    internal_entrypoint = environment / "bin" / "tvly"
+    internal_entrypoint.parent.mkdir()
+    internal_entrypoint.write_text("")
+
+    detected = detect_install(
+        distribution=FakeDistribution(),  # type: ignore[arg-type]
+        executable=environment / "bin" / "python",
+        prefix=environment,
+        entrypoint=internal_entrypoint,
+        process_environment={},
+        which=lambda command: f"/tools/{command}",
+    )
+
+    assert detected.command is None
+    assert detected.blocked_reason is not None
+    assert variable in detected.blocked_reason
 
 
 def test_update_check_json_is_read_only(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -252,6 +345,21 @@ def test_update_check_json_is_read_only(monkeypatch: pytest.MonkeyPatch) -> None
         "update_available": True,
         "updated": False,
     }
+
+
+def test_update_check_does_not_require_manager_binary_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(update_module, "__version__", "1.0.0")
+    monkeypatch.setattr(update_module, "fetch_latest_version", lambda: "1.1.0")
+    monkeypatch.setattr(
+        update_module,
+        "detect_install",
+        lambda: InstallInfo("pipx", None, blocked_reason="Could not safely determine PIPX_BIN_DIR."),
+    )
+
+    result = CliRunner().invoke(cli, ["update", "--check", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["update_available"] is True
 
 
 def test_update_check_failure_is_structured(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -311,7 +419,11 @@ def test_update_runs_detected_manager_and_verifies_version(monkeypatch: pytest.M
     monkeypatch.setattr(
         update_module,
         "detect_install",
-        lambda: InstallInfo("pipx", command, (("PIPX_HOME", "/custom/pipx"),)),
+        lambda: InstallInfo(
+            "pipx",
+            command,
+            (("PIPX_HOME", "/custom/pipx"), ("PIPX_BIN_DIR", "/custom/bin")),
+        ),
     )
     monkeypatch.setattr(update_module, "_installed_version", lambda: "1.1.0")
 
@@ -329,6 +441,7 @@ def test_update_runs_detected_manager_and_verifies_version(monkeypatch: pytest.M
     assert result.exit_code == 0
     assert calls == [command]
     assert environments[0]["PIPX_HOME"] == "/custom/pipx"
+    assert environments[0]["PIPX_BIN_DIR"] == "/custom/bin"
     assert environments[0]["PATH"] == os.environ["PATH"]
     assert json.loads(result.stdout) == {
         "current_version": "1.1.0",
@@ -351,6 +464,21 @@ def test_update_refuses_editable_install(monkeypatch: pytest.MonkeyPatch) -> Non
     output = json.loads(result.stdout)
     assert output["ok"] is False
     assert output["error"]["stage"] == "install_method"
+
+
+def test_update_reports_unsafe_manager_binary_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    reason = "Could not safely determine PIPX_BIN_DIR."
+    monkeypatch.setattr(update_module, "__version__", "1.0.0")
+    monkeypatch.setattr(update_module, "fetch_latest_version", lambda: "1.1.0")
+    monkeypatch.setattr(update_module, "detect_install", lambda: InstallInfo("pipx", None, blocked_reason=reason))
+
+    result = CliRunner().invoke(cli, ["update", "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "error": {"message": reason, "stage": "install_method"},
+        "ok": False,
+    }
 
 
 def test_update_failure_is_structured_and_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:

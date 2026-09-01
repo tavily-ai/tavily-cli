@@ -8,7 +8,7 @@ import shutil
 import site
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -31,6 +31,7 @@ class InstallInfo:
     method: str
     command: tuple[str, ...] | None
     environment: tuple[tuple[str, str], ...] = ()
+    blocked_reason: str | None = None
 
 
 @click.command("update")
@@ -61,7 +62,7 @@ def update_command(check_only: bool, json_output: bool) -> None:
         return
 
     if install.command is None:
-        message = _unsupported_install_message(install.method)
+        message = install.blocked_reason or _unsupported_install_message(install.method)
         _fail("install_method", message, 1, json_output)
         return
 
@@ -137,6 +138,8 @@ def detect_install(
     distribution: metadata.Distribution | None = None,
     executable: Path | None = None,
     prefix: Path | None = None,
+    entrypoint: Path | None = None,
+    process_environment: Mapping[str, str] | None = None,
     which: Callable[[str], str | None] = shutil.which,
 ) -> InstallInfo:
     """Detect the manager for the active package without changing the environment."""
@@ -145,6 +148,7 @@ def detect_install(
     # at the base interpreter and update the wrong environment.
     python = (executable or Path(sys.executable)).absolute()
     environment = (prefix or Path(sys.prefix)).resolve()
+    runtime_environment = os.environ if process_environment is None else process_environment
 
     if _is_source_install(dist):
         return InstallInfo("source", None)
@@ -152,18 +156,36 @@ def detect_install(
     path = f"{python.as_posix()}:{environment.as_posix()}".lower()
     if (environment / "pipx_metadata.json").is_file() or "/pipx/venvs/" in path:
         pipx = which("pipx")
-        manager_environment: tuple[tuple[str, str], ...] = ()
+        manager_environment: list[tuple[str, str]] = []
         # sys.prefix is the active pipx venv. Its directory name includes any
         # suffix and is the identifier accepted by `pipx upgrade`.
         pipx_environment = environment.name
         if environment.parent.name.lower() == "venvs":
-            manager_environment = (("PIPX_HOME", str(environment.parent.parent)),)
-        return InstallInfo("pipx", (pipx, "upgrade", pipx_environment) if pipx else None, manager_environment)
+            manager_environment.append(("PIPX_HOME", str(environment.parent.parent)))
+        bin_dir = _active_manager_bin_dir(
+            environment=environment,
+            entrypoint=entrypoint,
+            configured=runtime_environment.get("PIPX_BIN_DIR"),
+        )
+        if bin_dir is not None:
+            manager_environment.append(("PIPX_BIN_DIR", bin_dir))
+        blocked_reason = _missing_manager_bin_dir_message("pipx", "PIPX_BIN_DIR") if pipx and bin_dir is None else None
+        command = (pipx, "upgrade", pipx_environment) if pipx and blocked_reason is None else None
+        return InstallInfo("pipx", command, tuple(manager_environment), blocked_reason)
 
     if (environment / "uv-receipt.toml").is_file() or "/uv/tools/" in path:
         uv = which("uv")
-        manager_environment = (("UV_TOOL_DIR", str(environment.parent)),)
-        return InstallInfo("uv", (uv, "tool", "upgrade", PACKAGE_NAME) if uv else None, manager_environment)
+        manager_environment = [("UV_TOOL_DIR", str(environment.parent))]
+        bin_dir = _active_manager_bin_dir(
+            environment=environment,
+            entrypoint=entrypoint,
+            configured=runtime_environment.get("UV_TOOL_BIN_DIR"),
+        )
+        if bin_dir is not None:
+            manager_environment.append(("UV_TOOL_BIN_DIR", bin_dir))
+        blocked_reason = _missing_manager_bin_dir_message("uv", "UV_TOOL_BIN_DIR") if uv and bin_dir is None else None
+        command = (uv, "tool", "upgrade", PACKAGE_NAME) if uv and blocked_reason is None else None
+        return InstallInfo("uv", command, tuple(manager_environment), blocked_reason)
 
     installer = (dist.read_text("INSTALLER") or "").strip().lower()
     if installer == "uv":
@@ -176,6 +198,45 @@ def detect_install(
             command.insert(-2, "--user")
         return InstallInfo("pip", tuple(command))
     return InstallInfo("unknown", None)
+
+
+def _active_manager_bin_dir(*, environment: Path, entrypoint: Path | None, configured: str | None) -> str | None:
+    invoked = _invoked_entrypoint(entrypoint)
+    if invoked is not None:
+        try:
+            # Resolve the parent separately so the final launcher symlink stays
+            # visible while its target is checked against the active venv.
+            launcher = invoked.parent.resolve(strict=True) / invoked.name
+            target = launcher.resolve(strict=True)
+            active_environment = environment.resolve(strict=True)
+        except (OSError, RuntimeError):
+            pass
+        else:
+            target_is_active = target == active_environment or active_environment in target.parents
+            launcher_is_external = launcher != active_environment and active_environment not in launcher.parents
+            if target_is_active and launcher_is_external:
+                return str(launcher.parent)
+    return configured or None
+
+
+def _invoked_entrypoint(entrypoint: Path | None) -> Path | None:
+    raw = str(entrypoint) if entrypoint is not None else sys.argv[0]
+    if not raw:
+        return None
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        return candidate
+    if os.sep in raw or (os.altsep is not None and os.altsep in raw):
+        return (Path.cwd() / candidate).absolute()
+    located = shutil.which(raw)
+    return Path(located).absolute() if located else None
+
+
+def _missing_manager_bin_dir_message(manager: str, variable: str) -> str:
+    return (
+        f"Could not safely determine {variable} for the active {manager} installation. "
+        f"Re-run with {variable} set to the directory containing this installation's tvly command."
+    )
 
 
 def _is_source_install(distribution: metadata.Distribution) -> bool:
