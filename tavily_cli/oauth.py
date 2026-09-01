@@ -19,6 +19,7 @@ import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Literal
 
 import httpx
 
@@ -271,19 +272,38 @@ def revoke_token(
     registered: RegisteredClient,
     token: str,
     *,
+    token_type_hint: Literal["access_token", "refresh_token"],
     client: httpx.Client | None = None,
 ) -> None:
-    if not metadata.revocation_endpoint or not token:
+    if not token:
         return
+    if not metadata.revocation_endpoint:
+        raise OAuthError("OAuth server does not advertise a token revocation endpoint.")
+
     http = client or httpx.Client(timeout=HTTP_TIMEOUT)
     close = client is None
-    body = {"token": token}
+    body = {
+        "token": token,
+        "token_type_hint": token_type_hint,
+    }
     extra, basic = _token_auth_extras(registered)
     body.update(extra)
     try:
-        http.post(metadata.revocation_endpoint, data=body, auth=basic)
-    except httpx.HTTPError:
-        pass
+        resp = http.post(metadata.revocation_endpoint, data=body, auth=basic)
+
+        if resp.status_code == 400 and registered.token_endpoint_auth_method == "none":
+            # Compatibility fallback for MCP Python SDK revocation handlers that
+            # incorrectly require the nullable client_secret form field. The
+            # registered client remains public and no secret is supplied.
+            # https://github.com/modelcontextprotocol/python-sdk/issues/2260
+            compatibility_body = dict(body)
+            compatibility_body["client_secret"] = ""
+            resp = http.post(metadata.revocation_endpoint, data=compatibility_body, auth=basic)
+
+        if not resp.is_success:
+            raise OAuthError(_http_error("Token revocation failed", resp))
+    except httpx.HTTPError as e:
+        raise OAuthError(f"Could not reach the Tavily OAuth server: {e}") from e
     finally:
         if close:
             http.close()

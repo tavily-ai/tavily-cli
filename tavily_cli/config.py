@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,6 +15,15 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 _SESSION_FILE = CONFIG_DIR / "session.json"
 
 MCP_AUTH_DIR = Path.home() / ".mcp-auth"
+
+
+@dataclass(frozen=True)
+class ClearCredentialsResult:
+    """Outcome of local credential cleanup and optional server revocation."""
+
+    local_credentials_cleared: bool
+    server_revoked: bool | None
+    revocation_error: str | None = None
 
 
 def _pid_alive(pid: int) -> bool:
@@ -153,10 +163,20 @@ def get_api_base_url() -> str | None:
     return configured.rstrip("/") if configured else None
 
 
-def clear_credentials() -> None:
+def clear_credentials() -> ClearCredentialsResult:
     oauth = _read_config().get("oauth")
+    server_revoked: bool | None = None
+    revocation_error: str | None = None
     if isinstance(oauth, dict):
-        _revoke_stored_oauth(oauth)
+        try:
+            if _revoke_stored_oauth(oauth):
+                server_revoked = True
+        except Exception as e:
+            # Logout must still remove local credentials even when the remote
+            # session cannot be revoked. Return the failure to the command so it
+            # can report a partial result and exit non-zero.
+            server_revoked = False
+            revocation_error = str(e) or e.__class__.__name__
     if CONFIG_FILE.exists():
         config = _read_config()
         config.pop("api_key", None)
@@ -166,6 +186,11 @@ def clear_credentials() -> None:
         else:
             CONFIG_FILE.unlink()
     _clear_mcp_tokens()
+    return ClearCredentialsResult(
+        local_credentials_cleared=True,
+        server_revoked=server_revoked,
+        revocation_error=revocation_error,
+    )
 
 
 def _decode_jwt_payload(token: str) -> dict | None:
@@ -256,21 +281,42 @@ def _oauth_client_from_dict(data: dict):
     )
 
 
-def _revoke_stored_oauth(data: dict) -> None:
-    """Best-effort token revocation. Never raises — logout must still clear disk."""
-    from tavily_cli.oauth import fetch_metadata, revoke_token
+def _revoke_stored_oauth(data: dict) -> bool:
+    """Revoke stored refresh/access tokens, returning whether any were attempted."""
+    from tavily_cli.oauth import OAuthError, fetch_metadata, revoke_token
+
+    tokens = [
+        ("refresh_token", "refresh_token"),
+        ("access_token", "access_token"),
+    ]
+    present_tokens = [
+        (key, token_type_hint, data.get(key))
+        for key, token_type_hint in tokens
+        if isinstance(data.get(key), str) and data.get(key)
+    ]
+    if not present_tokens:
+        return False
 
     client = _oauth_client_from_dict(data)
     if client is None:
-        return
-    try:
-        metadata = fetch_metadata()
-        for key in ("access_token", "refresh_token"):
-            token = data.get(key)
-            if isinstance(token, str) and token:
-                revoke_token(metadata, client, token)
-    except Exception:
-        return
+        raise OAuthError("Stored OAuth client metadata is incomplete; server revocation was not attempted.")
+
+    metadata = fetch_metadata()
+    errors: list[str] = []
+    for key, token_type_hint, token in present_tokens:
+        try:
+            revoke_token(
+                metadata,
+                client,
+                token,
+                token_type_hint=token_type_hint,
+            )
+        except OAuthError as e:
+            errors.append(f"{key}: {e}")
+
+    if errors:
+        raise OAuthError("; ".join(errors))
+    return True
 
 
 def _get_oauth_access_token(config: dict) -> str | None:

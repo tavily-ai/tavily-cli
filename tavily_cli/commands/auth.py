@@ -152,16 +152,47 @@ def logout(ctx: click.Context, json_flag: bool) -> None:
     if not json_mode and ctx.parent and ctx.parent.obj:
         json_mode = ctx.parent.obj.get("json_output", False)
 
-    clear_credentials()
+    result = clear_credentials()
+    if result.revocation_error:
+        if json_mode:
+            import json as json_mod
+
+            click.echo(json_mod.dumps({
+                "authenticated": False,
+                "local_credentials_cleared": result.local_credentials_cleared,
+                "server_revoked": False,
+                "error": result.revocation_error,
+            }))
+        else:
+            from rich.markup import escape
+
+            from tavily_cli.common import sanitize_control
+            from tavily_cli.theme import err_console
+
+            detail = escape(sanitize_control(result.revocation_error))
+            err_console.print("  [#FFC769]>[/#FFC769] Local credentials cleared, but server revocation failed.")
+            err_console.print(f"    [dim]{detail}[/dim]")
+            err_console.print("  The previous OAuth token may remain usable; run [#9BC0AE]tvly login[/#9BC0AE] again if needed.")
+        raise SystemExit(3)
+
     if json_mode:
         import json as json_mod
 
-        click.echo(json_mod.dumps({"authenticated": False}))
+        payload = {
+            "authenticated": False,
+            "local_credentials_cleared": result.local_credentials_cleared,
+        }
+        if result.server_revoked is not None:
+            payload["server_revoked"] = result.server_revoked
+        click.echo(json_mod.dumps(payload))
         return
 
     from tavily_cli.theme import err_console
 
-    err_console.print("  [dim]Credentials cleared.[/dim]")
+    if result.server_revoked:
+        err_console.print("  [dim]Server session revoked and credentials cleared.[/dim]")
+    else:
+        err_console.print("  [dim]Credentials cleared.[/dim]")
     err_console.print("  Run [#9BC0AE]tvly login[/#9BC0AE] to authenticate again.")
 
 

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 from pathlib import Path
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
+from click.testing import CliRunner
 
 from tavily_cli.oauth import (
     OAuthError,
@@ -18,6 +21,7 @@ from tavily_cli.oauth import (
     fetch_metadata,
     generate_pkce,
     register_client,
+    revoke_token,
     token_is_expired,
 )
 
@@ -146,6 +150,189 @@ def test_refresh_tokens_keeps_refresh_if_omitted() -> None:
     tokens = refresh_tokens(metadata, client, "old-refresh", client=http)
     assert tokens.access_token == "new-access"
     assert tokens.refresh_token == "old-refresh"
+
+
+def test_revoke_public_client_uses_standard_request_first() -> None:
+    requests: list[dict[str, list[str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(parse_qs(request.read().decode(), keep_blank_values=True))
+        return httpx.Response(200)
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    metadata = OAuthMetadata(
+        authorization_endpoint="https://mcp.tavily.com/authorize",
+        token_endpoint="https://mcp.tavily.com/token",
+        registration_endpoint="https://mcp.tavily.com/register",
+        revocation_endpoint="https://mcp.tavily.com/revoke",
+    )
+    client = RegisteredClient(
+        client_id="cid",
+        client_secret=None,
+        token_endpoint_auth_method="none",
+        redirect_uri="http://127.0.0.1:1/callback",
+    )
+
+    revoke_token(metadata, client, "refresh-1", token_type_hint="refresh_token", client=http)
+
+    assert requests == [{
+        "token": ["refresh-1"],
+        "token_type_hint": ["refresh_token"],
+        "client_id": ["cid"],
+    }]
+
+
+def test_revoke_public_client_retries_known_400_with_empty_secret() -> None:
+    requests: list[dict[str, list[str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = parse_qs(request.read().decode(), keep_blank_values=True)
+        requests.append(body)
+        if len(requests) == 1:
+            return httpx.Response(400, json={"error": "invalid_request"})
+        return httpx.Response(200)
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    metadata = OAuthMetadata(
+        authorization_endpoint="https://mcp.tavily.com/authorize",
+        token_endpoint="https://mcp.tavily.com/token",
+        registration_endpoint="https://mcp.tavily.com/register",
+        revocation_endpoint="https://mcp.tavily.com/revoke",
+    )
+    client = RegisteredClient(
+        client_id="cid",
+        client_secret=None,
+        token_endpoint_auth_method="none",
+        redirect_uri="http://127.0.0.1:1/callback",
+    )
+
+    revoke_token(metadata, client, "refresh-1", token_type_hint="refresh_token", client=http)
+
+    assert "client_secret" not in requests[0]
+    assert requests[1]["client_secret"] == [""]
+    assert requests[1]["client_id"] == ["cid"]
+
+
+def test_revoke_token_raises_after_failed_compatibility_retry() -> None:
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(400, json={"error": "invalid_request"})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    metadata = OAuthMetadata(
+        authorization_endpoint="https://mcp.tavily.com/authorize",
+        token_endpoint="https://mcp.tavily.com/token",
+        registration_endpoint="https://mcp.tavily.com/register",
+        revocation_endpoint="https://mcp.tavily.com/revoke",
+    )
+    client = RegisteredClient(
+        client_id="cid",
+        client_secret=None,
+        token_endpoint_auth_method="none",
+        redirect_uri="http://127.0.0.1:1/callback",
+    )
+
+    with pytest.raises(OAuthError, match=r"Token revocation failed \(HTTP 400\)"):
+        revoke_token(metadata, client, "refresh-1", token_type_hint="refresh_token", client=http)
+    assert request_count == 2
+
+
+def test_stored_oauth_revokes_refresh_before_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tavily_cli import config, oauth
+
+    metadata = OAuthMetadata(
+        authorization_endpoint="https://mcp.tavily.com/authorize",
+        token_endpoint="https://mcp.tavily.com/token",
+        registration_endpoint="https://mcp.tavily.com/register",
+        revocation_endpoint="https://mcp.tavily.com/revoke",
+    )
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(oauth, "fetch_metadata", lambda: metadata)
+
+    def record_revocation(
+        metadata: OAuthMetadata,
+        client: RegisteredClient,
+        token: str,
+        *,
+        token_type_hint: str,
+    ) -> None:
+        calls.append((token, token_type_hint))
+
+    monkeypatch.setattr(oauth, "revoke_token", record_revocation)
+
+    attempted = config._revoke_stored_oauth({
+        "access_token": "access-1",
+        "refresh_token": "refresh-1",
+        "client_id": "cid",
+        "token_endpoint_auth_method": "none",
+    })
+
+    assert attempted is True
+    assert calls == [
+        ("refresh-1", "refresh_token"),
+        ("access-1", "access_token"),
+    ]
+
+
+def test_clear_credentials_reports_revocation_failure_but_clears_disk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tavily_cli import config
+
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
+    monkeypatch.setattr(config, "MCP_AUTH_DIR", tmp_path / "mcp-auth")
+    config._write_config({
+        "human_id": "keep-me",
+        "oauth": {
+            "access_token": "access-1",
+            "refresh_token": "refresh-1",
+            "client_id": "cid",
+            "token_endpoint_auth_method": "none",
+        },
+    })
+
+    def fail_revocation(data: dict) -> bool:
+        raise OAuthError("Token revocation failed (HTTP 500).")
+
+    monkeypatch.setattr(config, "_revoke_stored_oauth", fail_revocation)
+
+    result = config.clear_credentials()
+
+    assert result.local_credentials_cleared is True
+    assert result.server_revoked is False
+    assert result.revocation_error == "Token revocation failed (HTTP 500)."
+    assert config._read_config() == {"human_id": "keep-me"}
+
+
+def test_logout_json_reports_partial_revocation_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tavily_cli.commands import auth
+    from tavily_cli.config import ClearCredentialsResult
+
+    monkeypatch.setattr(
+        auth,
+        "clear_credentials",
+        lambda: ClearCredentialsResult(
+            local_credentials_cleared=True,
+            server_revoked=False,
+            revocation_error="Token revocation failed (HTTP 500).",
+        ),
+    )
+
+    result = CliRunner().invoke(auth.logout, ["--json"])
+
+    assert result.exit_code == 3
+    assert json.loads(result.output) == {
+        "authenticated": False,
+        "local_credentials_cleared": True,
+        "server_revoked": False,
+        "error": "Token revocation failed (HTTP 500).",
+    }
 
 
 def test_api_key_and_oauth_replace_each_other(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
