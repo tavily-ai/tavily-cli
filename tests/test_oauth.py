@@ -426,6 +426,228 @@ def test_json_browser_login_keeps_stderr_empty(monkeypatch: pytest.MonkeyPatch) 
     assert result.stderr == ""
 
 
+def test_save_api_key_keeps_previous_oauth_when_revocation_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tavily_cli import config
+
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
+    previous = {
+        "access_token": "old-access",
+        "refresh_token": "old-refresh",
+        "client_id": "old-client",
+        "token_endpoint_auth_method": "none",
+    }
+    config._write_config({"human_id": "keep-me", "oauth": previous})
+
+    def fail_revocation(data: dict) -> bool:
+        assert data == previous
+        raise OAuthError("old session revocation failed")
+
+    monkeypatch.setattr(config, "_revoke_stored_oauth", fail_revocation)
+
+    with pytest.raises(OAuthError, match="old session revocation failed"):
+        config.save_api_key("tvly-replacement")
+
+    assert config._read_config() == {"human_id": "keep-me", "oauth": previous}
+
+
+def test_save_oauth_session_revokes_previous_before_overwrite(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tavily_cli import config
+    from tavily_cli.oauth import OAuthSession, OAuthTokens
+
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
+    previous = {
+        "access_token": "old-access",
+        "refresh_token": "old-refresh",
+        "client_id": "old-client",
+        "token_endpoint_auth_method": "none",
+    }
+    config._write_config({"oauth": previous})
+    replacement = OAuthSession(
+        tokens=OAuthTokens(
+            access_token="new-access",
+            refresh_token="new-refresh",
+            expires_at=expires_at_from_now(3600),
+        ),
+        client=RegisteredClient(
+            client_id="new-client",
+            client_secret=None,
+            token_endpoint_auth_method="none",
+            redirect_uri="http://127.0.0.1:2/callback",
+        ),
+    )
+    revoked: list[dict] = []
+
+    def revoke_before_overwrite(data: dict) -> bool:
+        assert config._read_config()["oauth"] == previous
+        revoked.append(data)
+        return True
+
+    monkeypatch.setattr(config, "_revoke_stored_oauth", revoke_before_overwrite)
+
+    config.save_oauth_session(replacement)
+
+    stored = config._read_config()["oauth"]
+    assert revoked == [previous]
+    assert stored["access_token"] == "new-access"
+    assert stored["refresh_token"] == "new-refresh"
+    assert stored["client_id"] == "new-client"
+
+
+def test_save_oauth_session_keeps_previous_and_cleans_replacement_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tavily_cli import config
+    from tavily_cli.oauth import OAuthSession, OAuthTokens
+
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
+    previous = {
+        "access_token": "old-access",
+        "refresh_token": "old-refresh",
+        "client_id": "old-client",
+        "token_endpoint_auth_method": "none",
+    }
+    config._write_config({"oauth": previous})
+    replacement = OAuthSession(
+        tokens=OAuthTokens(
+            access_token="new-access",
+            refresh_token="new-refresh",
+            expires_at=expires_at_from_now(3600),
+        ),
+        client=RegisteredClient(
+            client_id="new-client",
+            client_secret=None,
+            token_endpoint_auth_method="none",
+            redirect_uri="http://127.0.0.1:2/callback",
+        ),
+    )
+    revocation_attempts: list[dict] = []
+
+    def fail_previous_then_clean_replacement(data: dict) -> bool:
+        revocation_attempts.append(data)
+        if len(revocation_attempts) == 1:
+            raise OAuthError("old session revocation failed")
+        return True
+
+    monkeypatch.setattr(config, "_revoke_stored_oauth", fail_previous_then_clean_replacement)
+
+    with pytest.raises(OAuthError, match="Could not replace the previous OAuth session"):
+        config.save_oauth_session(replacement)
+
+    assert config._read_config() == {"oauth": previous}
+    assert revocation_attempts[0] == previous
+    assert revocation_attempts[1]["refresh_token"] == "new-refresh"
+    assert revocation_attempts[1]["client_id"] == "new-client"
+
+
+def test_refresh_persists_tokens_without_revoking_active_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tavily_cli import config, oauth
+    from tavily_cli.oauth import OAuthTokens
+
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
+    previous = {
+        "access_token": "old-access",
+        "refresh_token": "same-refresh",
+        "expires_at": 0,
+        "token_type": "Bearer",
+        "client_id": "same-client",
+        "client_secret": None,
+        "token_endpoint_auth_method": "none",
+        "redirect_uri": "http://127.0.0.1:1/callback",
+    }
+    config._write_config({"oauth": previous})
+
+    monkeypatch.setattr(oauth, "fetch_metadata", lambda: object())
+    monkeypatch.setattr(
+        oauth,
+        "refresh_tokens",
+        lambda metadata, client, refresh_token: OAuthTokens(
+            access_token="new-access",
+            refresh_token=refresh_token,
+            expires_at=expires_at_from_now(3600),
+        ),
+    )
+    monkeypatch.setattr(
+        config,
+        "_revoke_stored_oauth",
+        lambda data: pytest.fail("automatic refresh must not revoke the active session"),
+    )
+
+    access_token = config._get_oauth_access_token(config._read_config())
+
+    assert access_token == "new-access"
+    stored = config._read_config()["oauth"]
+    assert stored["access_token"] == "new-access"
+    assert stored["refresh_token"] == "same-refresh"
+    assert stored["client_id"] == "same-client"
+
+
+def test_api_key_login_json_reports_replacement_revocation_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tavily_cli.commands import auth
+
+    def fail_save(api_key: str) -> None:
+        raise OAuthError("old session revocation failed")
+
+    monkeypatch.setattr(auth, "save_api_key", fail_save)
+
+    result = CliRunner().invoke(auth.login, ["--api-key", "tvly-replacement", "--json"])
+
+    assert result.exit_code == 3
+    assert json.loads(result.stdout) == {
+        "authenticated": False,
+        "error": "old session revocation failed",
+    }
+
+
+def test_oauth_login_json_reports_replacement_revocation_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tavily_cli import oauth
+    from tavily_cli.commands import auth
+    from tavily_cli.oauth import OAuthSession, OAuthTokens
+
+    replacement = OAuthSession(
+        tokens=OAuthTokens(
+            access_token="new-access",
+            refresh_token="new-refresh",
+            expires_at=expires_at_from_now(3600),
+        ),
+        client=RegisteredClient(
+            client_id="new-client",
+            client_secret=None,
+            token_endpoint_auth_method="none",
+            redirect_uri="http://127.0.0.1:2/callback",
+        ),
+    )
+
+    monkeypatch.setattr(oauth, "looks_headless", lambda: False)
+    monkeypatch.setattr(oauth, "run_browser_login", lambda **kwargs: replacement)
+
+    def fail_save(session: OAuthSession) -> None:
+        raise OAuthError("old session revocation failed")
+
+    monkeypatch.setattr(auth, "save_oauth_session", fail_save)
+
+    result = CliRunner().invoke(auth.login, ["--json"])
+
+    assert result.exit_code == 3
+    assert json.loads(result.stdout) == {
+        "authenticated": False,
+        "error": "old session revocation failed",
+    }
+
+
 def test_api_key_and_oauth_replace_each_other(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tavily_cli import config
     from tavily_cli.oauth import OAuthSession, OAuthTokens
@@ -456,6 +678,9 @@ def test_api_key_and_oauth_replace_each_other(tmp_path: Path, monkeypatch: pytes
     stored = config._read_config()
     assert "api_key" not in stored
 
+    revoked: list[dict] = []
+    monkeypatch.setattr(config, "_revoke_stored_oauth", lambda data: revoked.append(data) or True)
     config.save_api_key("tvly-other")
     assert config.get_api_key() == "tvly-other"
     assert not config.has_stored_oauth()
+    assert revoked == [stored["oauth"]]

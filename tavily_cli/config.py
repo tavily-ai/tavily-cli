@@ -109,22 +109,13 @@ def _write_config(data: dict) -> None:
         os.umask(old_umask)
 
 
-def save_api_key(api_key: str) -> None:
-    config = _read_config()
-    config["api_key"] = api_key
-    config.pop("oauth", None)
-    _write_config(config)
-
-
-def save_oauth_session(session) -> None:
-    """Persist OAuth tokens and the dynamically registered client in config.json."""
+def _oauth_session_data(session) -> dict:
+    """Serialize a validated OAuth session for config.json."""
     from tavily_cli.oauth import OAuthSession
 
     if not isinstance(session, OAuthSession):
         raise TypeError("session must be an OAuthSession")
-    config = _read_config()
-    config.pop("api_key", None)
-    config["oauth"] = {
+    return {
         "access_token": session.tokens.access_token,
         "refresh_token": session.tokens.refresh_token,
         "expires_at": session.tokens.expires_at,
@@ -134,6 +125,49 @@ def save_oauth_session(session) -> None:
         "token_endpoint_auth_method": session.client.token_endpoint_auth_method,
         "redirect_uri": session.client.redirect_uri,
     }
+
+
+def save_api_key(api_key: str) -> None:
+    """Replace stored credentials with an API key, revoking old OAuth first."""
+    config = _read_config()
+    previous_oauth = config.get("oauth")
+    if isinstance(previous_oauth, dict):
+        _revoke_stored_oauth(previous_oauth)
+    config["api_key"] = api_key
+    config.pop("oauth", None)
+    _write_config(config)
+
+
+def save_oauth_session(session) -> None:
+    """Replace stored credentials with a newly authorized OAuth session."""
+    from tavily_cli.oauth import OAuthError
+
+    replacement_oauth = _oauth_session_data(session)
+    config = _read_config()
+    previous_oauth = config.get("oauth")
+    if isinstance(previous_oauth, dict) and previous_oauth != replacement_oauth:
+        try:
+            _revoke_stored_oauth(previous_oauth)
+        except OAuthError as previous_error:
+            try:
+                _revoke_stored_oauth(replacement_oauth)
+            except OAuthError as cleanup_error:
+                raise OAuthError(
+                    f"Could not replace the previous OAuth session: {previous_error} "
+                    f"The new OAuth session also could not be revoked: {cleanup_error}"
+                ) from previous_error
+            raise OAuthError(f"Could not replace the previous OAuth session: {previous_error}") from previous_error
+
+    config.pop("api_key", None)
+    config["oauth"] = replacement_oauth
+    _write_config(config)
+
+
+def _save_refreshed_oauth_session(session) -> None:
+    """Persist refreshed tokens for the active session without revoking it."""
+    config = _read_config()
+    config.pop("api_key", None)
+    config["oauth"] = _oauth_session_data(session)
     _write_config(config)
 
 
@@ -343,7 +377,7 @@ def _get_oauth_access_token(config: dict) -> str | None:
         return None
     try:
         tokens = refresh_tokens(fetch_metadata(), client, refresh)
-        save_oauth_session(OAuthSession(tokens=tokens, client=client))
+        _save_refreshed_oauth_session(OAuthSession(tokens=tokens, client=client))
         return tokens.access_token
     except Exception:
         return None

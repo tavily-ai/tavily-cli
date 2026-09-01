@@ -31,12 +31,16 @@ def login(ctx: click.Context, api_key: str | None, no_browser: bool, json_flag: 
     if not json_mode and ctx.parent and ctx.parent.obj:
         json_mode = ctx.parent.obj.get("json_output", False)
 
+    from tavily_cli.oauth import OAuthError, looks_headless, run_browser_login
+
     if api_key:
-        save_api_key(api_key)
+        try:
+            save_api_key(api_key)
+        except OAuthError as e:
+            _print_login_failure(str(e), json_mode=json_mode)
+            raise SystemExit(3) from e
         _print_login_success("API key", f"Saved to {CONFIG_FILE}", json_mode=json_mode)
         return
-
-    from tavily_cli.oauth import OAuthError, looks_headless, run_browser_login
 
     open_browser = not (no_browser or looks_headless())
 
@@ -74,6 +78,7 @@ def login(ctx: click.Context, api_key: str | None, no_browser: bool, json_flag: 
         else:
             with err_console.status("[#5CD9E6]Waiting for browser authorization...[/#5CD9E6]", spinner="dots"):
                 session = run_browser_login(open_browser=open_browser, on_status=_show_url)
+        save_oauth_session(session)
     except OAuthError as e:
         _print_login_failure(str(e), json_mode=json_mode)
         raise SystemExit(3) from e
@@ -81,7 +86,6 @@ def login(ctx: click.Context, api_key: str | None, no_browser: bool, json_flag: 
         _print_login_failure("Login cancelled.", json_mode=json_mode)
         raise SystemExit(3) from None
 
-    save_oauth_session(session)
     _print_login_success("OAuth", f"Token stored in {CONFIG_FILE}", json_mode=json_mode)
 
 
