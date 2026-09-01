@@ -104,6 +104,57 @@ def test_register_client_rejects_http_errors() -> None:
         register_client(metadata, "http://127.0.0.1:1/callback", client=http)
 
 
+@pytest.mark.parametrize(
+    ("response_kind", "expected_error"),
+    [
+        ("html", "OAuth client registration returned invalid JSON"),
+        ("list", "expected a JSON object"),
+        ("missing_client_id", "did not return a client_id"),
+    ],
+)
+def test_register_client_normalizes_malformed_success_responses(
+    response_kind: str,
+    expected_error: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if response_kind == "html":
+            return httpx.Response(200, text="<html>temporary proxy error</html>")
+        if response_kind == "list":
+            return httpx.Response(200, json=["not", "an", "object"])
+        return httpx.Response(200, json={})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    metadata = OAuthMetadata(
+        authorization_endpoint="https://mcp.tavily.com/authorize",
+        token_endpoint="https://mcp.tavily.com/token",
+        registration_endpoint="https://mcp.tavily.com/register",
+        revocation_endpoint=None,
+    )
+
+    with pytest.raises(OAuthError, match=expected_error):
+        register_client(metadata, "http://127.0.0.1:1/callback", client=http)
+
+
+def test_register_client_rejects_invalid_confidential_client_secret() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "client_id": "cid",
+            "client_secret": 123,
+            "token_endpoint_auth_method": "client_secret_post",
+        })
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    metadata = OAuthMetadata(
+        authorization_endpoint="https://mcp.tavily.com/authorize",
+        token_endpoint="https://mcp.tavily.com/token",
+        registration_endpoint="https://mcp.tavily.com/register",
+        revocation_endpoint=None,
+    )
+
+    with pytest.raises(OAuthError, match="issued no valid client_secret"):
+        register_client(metadata, "http://127.0.0.1:1/callback", client=http)
+
+
 def test_fetch_metadata_uses_discovery() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
@@ -150,6 +201,45 @@ def test_refresh_tokens_keeps_refresh_if_omitted() -> None:
     tokens = refresh_tokens(metadata, client, "old-refresh", client=http)
     assert tokens.access_token == "new-access"
     assert tokens.refresh_token == "old-refresh"
+
+
+@pytest.mark.parametrize(
+    ("response_kind", "expected_error"),
+    [
+        ("html", "OAuth token endpoint returned invalid JSON"),
+        ("list", "expected a JSON object"),
+        ("missing_access_token", "did not include a valid access_token"),
+    ],
+)
+def test_token_request_normalizes_malformed_success_responses(
+    response_kind: str,
+    expected_error: str,
+) -> None:
+    from tavily_cli.oauth import refresh_tokens
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if response_kind == "html":
+            return httpx.Response(200, text="<html>temporary proxy error</html>")
+        if response_kind == "list":
+            return httpx.Response(200, json=["not", "an", "object"])
+        return httpx.Response(200, json={})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    metadata = OAuthMetadata(
+        authorization_endpoint="https://mcp.tavily.com/authorize",
+        token_endpoint="https://mcp.tavily.com/token",
+        registration_endpoint="https://mcp.tavily.com/register",
+        revocation_endpoint=None,
+    )
+    client = RegisteredClient(
+        client_id="cid",
+        client_secret=None,
+        token_endpoint_auth_method="none",
+        redirect_uri="http://127.0.0.1:1/callback",
+    )
+
+    with pytest.raises(OAuthError, match=expected_error):
+        refresh_tokens(metadata, client, "old-refresh", client=http)
 
 
 def test_revoke_public_client_uses_standard_request_first() -> None:

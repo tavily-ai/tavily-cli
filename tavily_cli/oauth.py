@@ -140,6 +140,20 @@ def fetch_metadata(client: httpx.Client | None = None) -> OAuthMetadata:
             http.close()
 
 
+def _json_object_response(response: httpx.Response, *, operation: str) -> dict:
+    """Parse a successful OAuth response as a JSON object."""
+    try:
+        data = response.json()
+    except (ValueError, UnicodeDecodeError) as e:
+        raise OAuthError(f"{operation} returned invalid JSON (HTTP {response.status_code}).") from e
+    if not isinstance(data, dict):
+        raise OAuthError(
+            f"{operation} returned an invalid response "
+            f"(HTTP {response.status_code}; expected a JSON object)."
+        )
+    return data
+
+
 def register_client(
     metadata: OAuthMetadata,
     redirect_uri: str,
@@ -162,7 +176,7 @@ def register_client(
         resp = http.post(metadata.registration_endpoint, json=payload)
         if resp.status_code >= 400:
             raise OAuthError(_http_error("Client registration failed", resp))
-        data = resp.json()
+        data = _json_object_response(resp, operation="OAuth client registration")
         client_id = data.get("client_id")
         if not isinstance(client_id, str) or not client_id:
             raise OAuthError("OAuth registration did not return a client_id.")
@@ -173,9 +187,11 @@ def register_client(
                 f"token_endpoint_auth_method {method!r}."
             )
         secret = data.get("client_secret")
-        if method in ("client_secret_post", "client_secret_basic") and not secret:
+        if method in ("client_secret_post", "client_secret_basic") and (
+            not isinstance(secret, str) or not secret
+        ):
             raise OAuthError(
-                f"Authorization server registered the CLI for {method!r} but issued no client_secret."
+                f"Authorization server registered the CLI for {method!r} but issued no valid client_secret."
             )
         return RegisteredClient(
             client_id=client_id,
@@ -322,10 +338,10 @@ def _request_tokens(
         resp = http.post(token_endpoint, data=body, auth=basic)
         if resp.status_code >= 400:
             raise OAuthError(_http_error("Token request failed", resp))
-        data = resp.json()
+        data = _json_object_response(resp, operation="OAuth token endpoint")
         access = data.get("access_token")
         if not isinstance(access, str) or not access:
-            raise OAuthError("OAuth token response did not include an access_token.")
+            raise OAuthError("OAuth token response did not include a valid access_token.")
         refresh = data.get("refresh_token")
         return OAuthTokens(
             access_token=access,
