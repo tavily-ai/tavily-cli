@@ -58,7 +58,14 @@ def _resolve_json(ctx: click.Context, local_flag: bool) -> bool:
     return False
 
 
-def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
+def _render_stream(
+    stream_resp,
+    *,
+    json_mode: bool = False,
+    output_file: str | None = None,
+    save: bool = False,
+    force: bool = False,
+) -> None:
     """Parse SSE stream chunks, show live status, then render with Rich like non-stream."""
     from tavily_cli.output import print_research_result
     from tavily_cli.theme import err_console
@@ -116,7 +123,13 @@ def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
         "content": full_content,
         "sources": sources,
     }
-    print_research_result(result, json_mode=False, output_file=output_file)
+    print_research_result(
+        result,
+        json_mode=json_mode,
+        output_file=output_file,
+        save=save,
+        force=force,
+    )
 
 
 @research.command()
@@ -126,7 +139,9 @@ def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
 @click.option("--stream", is_flag=True, default=False, help="Stream results in real-time.")
 @click.option("--output-schema", default=None, help="Path to JSON schema file for structured output.")
 @click.option("--citation-format", type=click.Choice(["numbered", "mla", "apa", "chicago"]), default=None, help="Citation format.")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@click.option("--output", "-o", "output_file", default=None, help="Save as JSON (.json) or Markdown (.md).")
+@click.option("--save", is_flag=True, default=False, help="Save report.md and report.json under .tavily/research/.")
+@click.option("--force", is_flag=True, default=False, help="Overwrite existing output files.")
 @click.option("--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
 @click.option("--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
 @click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
@@ -141,6 +156,8 @@ def run(
     output_schema: str | None,
     citation_format: str | None,
     output_file: str | None,
+    save: bool,
+    force: bool,
     poll_interval: int,
     timeout: int,
     json_flag: bool,
@@ -155,7 +172,7 @@ def run(
     Requires a Tavily API key. Sign up at https://tavily.com
     """
     from tavily_cli.config import get_client, require_api_key_friendly
-    from tavily_cli.output import emit, print_research_result
+    from tavily_cli.output import emit, print_research_result, validate_artifact_options
 
     json_mode = _resolve_json(ctx, json_flag)
 
@@ -163,6 +180,12 @@ def run(
         query = sys.stdin.read(100_000).strip()
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
+
+    validate_artifact_options(
+        output_file=output_file,
+        save=save,
+        force=force,
+    )
 
     require_api_key_friendly("research", json_mode=json_mode)
     client = get_client(client_name=client_name, json_mode=json_mode)
@@ -186,7 +209,7 @@ def run(
         kwargs["stream"] = True
         try:
             stream_resp = client.research(**kwargs)
-            if json_mode:
+            if json_mode and not (output_file or save):
                 # Re-serialize each SSE event as one JSON line (NDJSON) rather
                 # than forwarding raw SSE bytes: this keeps the output valid,
                 # machine-parseable JSON and lets json.dumps escape any control
@@ -206,7 +229,15 @@ def run(
                             continue
                         click.echo(json.dumps(event, ensure_ascii=False))
             else:
-                _render_stream(stream_resp, output_file=output_file)
+                _render_stream(
+                    stream_resp,
+                    json_mode=json_mode,
+                    output_file=output_file,
+                    save=save,
+                    force=force,
+                )
+        except click.ClickException:
+            raise
         except Exception as e:
             handle_api_error(e, json_mode)
         return
@@ -220,7 +251,13 @@ def run(
     # If the initial response is already complete (e.g., MCP endpoint returns
     # the full result synchronously), skip polling entirely.
     if result.get("status") in ("completed", "failed") or result.get("content"):
-        print_research_result(result, json_mode=json_mode, output_file=output_file)
+        print_research_result(
+            result,
+            json_mode=json_mode,
+            output_file=output_file,
+            save=save,
+            force=force,
+        )
         return
 
     request_id = result.get("request_id")
@@ -229,7 +266,17 @@ def run(
         handle_api_error(RuntimeError(f"Unexpected API response: {result}"), json_mode)
 
     if no_wait:
-        emit({"request_id": request_id, "status": result.get("status", "pending")}, json_mode=True, output_file=output_file)
+        pending_result = {"request_id": request_id, "status": result.get("status", "pending")}
+        if output_file or save:
+            print_research_result(
+                pending_result,
+                json_mode=json_mode,
+                output_file=output_file,
+                save=save,
+                force=force,
+            )
+        else:
+            emit(pending_result, json_mode=True)
         return
 
     elapsed = 0
@@ -246,7 +293,17 @@ def run(
             time.sleep(poll_interval)
             elapsed += poll_interval
         else:
-            emit({"request_id": request_id, "status": "timeout"}, json_mode=True, output_file=output_file)
+            timeout_result = {"request_id": request_id, "status": "timeout"}
+            if output_file or save:
+                print_research_result(
+                    timeout_result,
+                    json_mode=json_mode,
+                    output_file=output_file,
+                    save=save,
+                    force=force,
+                )
+            else:
+                emit(timeout_result, json_mode=True)
             return
     else:
         # Rich mode: live spinner with running elapsed time
@@ -266,9 +323,23 @@ def run(
                 elapsed += 1
             else:
                 err_console.print(f"[#FFC769]Timed out after {timeout}s. Resume with: tvly research poll {escape(sanitize_control(request_id))}[/#FFC769]")
+                if output_file or save:
+                    print_research_result(
+                        {"request_id": request_id, "status": "timeout"},
+                        json_mode=json_mode,
+                        output_file=output_file,
+                        save=save,
+                        force=force,
+                    )
                 return
 
-    print_research_result(response, json_mode=json_mode, output_file=output_file)
+    print_research_result(
+        response,
+        json_mode=json_mode,
+        output_file=output_file,
+        save=save,
+        force=force,
+    )
 
 
 @research.command()
@@ -309,7 +380,9 @@ def status(ctx: click.Context, request_id: str, json_flag: bool, client_name: st
 @click.argument("request_id")
 @click.option("--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
 @click.option("--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@click.option("--output", "-o", "output_file", default=None, help="Save as JSON (.json) or Markdown (.md).")
+@click.option("--save", is_flag=True, default=False, help="Save report.md and report.json under .tavily/research/.")
+@click.option("--force", is_flag=True, default=False, help="Overwrite existing output files.")
 @click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
 @client_name_option
 @click.pass_context
@@ -319,15 +392,22 @@ def poll(
     poll_interval: int,
     timeout: int,
     output_file: str | None,
+    save: bool,
+    force: bool,
     json_flag: bool,
     client_name: str | None,
 ) -> None:
     """Poll a research task until completion and return results."""
     from tavily_cli.config import get_client, require_api_key_friendly
-    from tavily_cli.output import emit, print_research_result
+    from tavily_cli.output import emit, print_research_result, validate_artifact_options
     from tavily_cli.theme import err_console
 
     json_mode = _resolve_json(ctx, json_flag)
+    validate_artifact_options(
+        output_file=output_file,
+        save=save,
+        force=force,
+    )
     require_api_key_friendly("research poll", json_mode=json_mode)
     client = get_client(client_name=client_name, json_mode=json_mode)
 
@@ -344,7 +424,17 @@ def poll(
             time.sleep(poll_interval)
             elapsed += poll_interval
         else:
-            emit({"request_id": request_id, "status": "timeout"}, json_mode=True, output_file=output_file)
+            timeout_result = {"request_id": request_id, "status": "timeout"}
+            if output_file or save:
+                print_research_result(
+                    timeout_result,
+                    json_mode=json_mode,
+                    output_file=output_file,
+                    save=save,
+                    force=force,
+                )
+            else:
+                emit(timeout_result, json_mode=True)
             return
     else:
         with err_console.status("", spinner="dots") as live:
@@ -363,6 +453,20 @@ def poll(
                 elapsed += 1
             else:
                 err_console.print(f"[#FFC769]Timed out after {timeout}s.[/#FFC769]")
+                if output_file or save:
+                    print_research_result(
+                        {"request_id": request_id, "status": "timeout"},
+                        json_mode=json_mode,
+                        output_file=output_file,
+                        save=save,
+                        force=force,
+                    )
                 return
 
-    print_research_result(response, json_mode=json_mode, output_file=output_file)
+    print_research_result(
+        response,
+        json_mode=json_mode,
+        output_file=output_file,
+        save=save,
+        force=force,
+    )

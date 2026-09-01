@@ -22,7 +22,9 @@ from tavily_cli.common import (
 @click.option("--format", "fmt", type=click.Choice(["markdown", "text"]), default=None, help="Output format.")
 @click.option("--include-images", is_flag=True, default=False, help="Include image URLs.")
 @click.option("--timeout", type=float, default=None, help="Max wait time in seconds (1-60).")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@click.option("--output", "-o", "output_file", default=None, help="Save as JSON (.json) or Markdown (.md).")
+@click.option("--save", is_flag=True, default=False, help="Save JSON under .tavily/extract/.")
+@click.option("--force", is_flag=True, default=False, help="Overwrite an existing output file.")
 @client_name_option
 @json_option
 def extract(
@@ -34,6 +36,8 @@ def extract(
     include_images: bool,
     timeout: float | None,
     output_file: str | None,
+    save: bool,
+    force: bool,
     client_name: str | None,
     json_output: bool,
 ) -> None:
@@ -45,7 +49,13 @@ def extract(
     `tvly login` to authenticate and remove the cap.
     """
     from tavily_cli.config import get_client_or_keyless
-    from tavily_cli.output import print_extract_results
+    from tavily_cli.output import print_extract_results, validate_artifact_options
+
+    validate_artifact_options(
+        output_file=output_file,
+        save=save,
+        force=force,
+    )
 
     url_list = list(urls)
     if len(url_list) > 20:
@@ -79,4 +89,10 @@ def extract(
     except Exception as e:
         handle_api_error(e, json_output)
 
-    print_extract_results(response, json_mode=json_output, output_file=output_file)
+    print_extract_results(
+        response,
+        json_mode=json_output,
+        output_file=output_file,
+        save=save,
+        force=force,
+    )

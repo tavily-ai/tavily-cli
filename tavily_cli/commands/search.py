@@ -32,7 +32,9 @@ from tavily_cli.common import (
 @click.option("--include-images", is_flag=True, default=False, help="Include image results.")
 @click.option("--include-image-descriptions", is_flag=True, default=False, help="Include AI image descriptions.")
 @click.option("--chunks-per-source", type=int, default=None, help="Chunks per source (advanced/fast depth only).")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@click.option("--output", "-o", "output_file", default=None, help="Save as JSON (.json) or Markdown (.md).")
+@click.option("--save", is_flag=True, default=False, help="Save JSON under .tavily/search/.")
+@click.option("--force", is_flag=True, default=False, help="Overwrite an existing output file.")
 @client_name_option
 @json_option
 def search(
@@ -52,6 +54,8 @@ def search(
     include_image_descriptions: bool,
     chunks_per_source: int | None,
     output_file: str | None,
+    save: bool,
+    force: bool,
     client_name: str | None,
     json_output: bool,
 ) -> None:
@@ -63,12 +67,18 @@ def search(
     `tvly login` to authenticate and remove the cap.
     """
     from tavily_cli.config import get_client_or_keyless
-    from tavily_cli.output import print_search_results
+    from tavily_cli.output import print_search_results, validate_artifact_options
 
     if query == "-":
         query = sys.stdin.read(100_000).strip()
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
+
+    validate_artifact_options(
+        output_file=output_file,
+        save=save,
+        force=force,
+    )
 
     kwargs: dict = {"query": query}
     if search_depth is not None:
@@ -114,4 +124,10 @@ def search(
     except Exception as e:
         handle_api_error(e, json_output)
 
-    print_search_results(response, json_mode=json_output, output_file=output_file)
+    print_search_results(
+        response,
+        json_mode=json_output,
+        output_file=output_file,
+        save=save,
+        force=force,
+    )
