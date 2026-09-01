@@ -12,6 +12,11 @@ from tavily_cli.config import (
     save_oauth_session,
 )
 
+_ENV_CREDENTIAL_WARNING = (
+    "TAVILY_API_KEY is still set and cannot be removed from the parent environment by this process. "
+    "Run: unset TAVILY_API_KEY"
+)
+
 
 @click.command()
 @click.option("--api-key", default=None, help="Tavily API key (tvly-...). If omitted, opens browser for OAuth.")
@@ -156,6 +161,32 @@ def _print_login_failure(message: str, *, json_mode: bool) -> None:
     err_console.print()
 
 
+def _effective_auth_state() -> tuple[str | None, str | None, str | None]:
+    """Return the effective credential and its method/source."""
+    import os
+
+    from tavily_cli.config import has_stored_oauth, is_oauth_token
+
+    key = get_api_key()
+    source = None
+    method = None
+    if key:
+        if os.environ.get("TAVILY_API_KEY"):
+            source = "TAVILY_API_KEY environment variable"
+            method = "env"
+        elif is_oauth_token(key):
+            if has_stored_oauth():
+                source = f"OAuth ({CONFIG_FILE})"
+                method = "oauth"
+            else:
+                source = "OAuth (~/.mcp-auth/)"
+                method = "oauth_legacy"
+        elif CONFIG_FILE.exists():
+            source = f"config file ({CONFIG_FILE})"
+            method = "api_key"
+    return key, method, source
+
+
 @click.command()
 @click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
 @click.pass_context
@@ -166,16 +197,25 @@ def logout(ctx: click.Context, json_flag: bool) -> None:
         json_mode = ctx.parent.obj.get("json_output", False)
 
     result = clear_credentials()
+    key, method, source = _effective_auth_state()
+    environment_credential_present = method == "env"
+    payload = {
+        "authenticated": key is not None,
+        "method": method,
+        "source": source,
+        "local_credentials_cleared": result.local_credentials_cleared,
+        "environment_credential_present": environment_credential_present,
+    }
+    if environment_credential_present:
+        payload["warning"] = _ENV_CREDENTIAL_WARNING
+
     if result.revocation_error:
         if json_mode:
             import json as json_mod
 
-            click.echo(json_mod.dumps({
-                "authenticated": False,
-                "local_credentials_cleared": result.local_credentials_cleared,
-                "server_revoked": False,
-                "error": result.revocation_error,
-            }))
+            payload["server_revoked"] = False
+            payload["error"] = result.revocation_error
+            click.echo(json_mod.dumps(payload))
         else:
             from rich.markup import escape
 
@@ -185,16 +225,15 @@ def logout(ctx: click.Context, json_flag: bool) -> None:
             detail = escape(sanitize_control(result.revocation_error))
             err_console.print("  [#FFC769]>[/#FFC769] Local credentials cleared, but server revocation failed.")
             err_console.print(f"    [dim]{detail}[/dim]")
-            err_console.print("  The previous OAuth token may remain usable; run [#9BC0AE]tvly login[/#9BC0AE] again if needed.")
+            err_console.print("  The previous OAuth token may remain usable.")
+            if environment_credential_present:
+                err_console.print("  [#FFC769]>[/#FFC769] TAVILY_API_KEY is still set, so the CLI remains authenticated.")
+                err_console.print("    [dim]Run in your shell: unset TAVILY_API_KEY[/dim]")
         raise SystemExit(3)
 
     if json_mode:
         import json as json_mod
 
-        payload = {
-            "authenticated": False,
-            "local_credentials_cleared": result.local_credentials_cleared,
-        }
         if result.server_revoked is not None:
             payload["server_revoked"] = result.server_revoked
         click.echo(json_mod.dumps(payload))
@@ -206,7 +245,11 @@ def logout(ctx: click.Context, json_flag: bool) -> None:
         err_console.print("  [dim]Server session revoked and credentials cleared.[/dim]")
     else:
         err_console.print("  [dim]Credentials cleared.[/dim]")
-    err_console.print("  Run [#9BC0AE]tvly login[/#9BC0AE] to authenticate again.")
+    if environment_credential_present:
+        err_console.print("  [#FFC769]>[/#FFC769] TAVILY_API_KEY is still set, so the CLI remains authenticated.")
+        err_console.print("    [dim]Run in your shell: unset TAVILY_API_KEY[/dim]")
+    else:
+        err_console.print("  Run [#9BC0AE]tvly login[/#9BC0AE] to authenticate again.")
 
 
 @click.command("auth")
@@ -215,34 +258,14 @@ def logout(ctx: click.Context, json_flag: bool) -> None:
 def auth_status(ctx: click.Context, json_flag: bool) -> None:
     """Check authentication status."""
     import json as json_mod
-    import os
 
-    from tavily_cli.config import is_oauth_token
     from tavily_cli.theme import console
 
     json_mode = json_flag
     if not json_mode and ctx.parent and ctx.parent.obj:
         json_mode = ctx.parent.obj.get("json_output", False)
 
-    key = get_api_key()
-    source = None
-    method = None
-    if key:
-        if os.environ.get("TAVILY_API_KEY"):
-            source = "TAVILY_API_KEY environment variable"
-            method = "env"
-        elif is_oauth_token(key):
-            from tavily_cli.config import has_stored_oauth
-
-            if has_stored_oauth():
-                source = f"OAuth ({CONFIG_FILE})"
-                method = "oauth"
-            else:
-                source = "OAuth (~/.mcp-auth/)"
-                method = "oauth_legacy"
-        elif CONFIG_FILE.exists():
-            source = f"config file ({CONFIG_FILE})"
-            method = "api_key"
+    key, method, source = _effective_auth_state()
 
     if json_mode:
         click.echo(json_mod.dumps({

@@ -421,15 +421,82 @@ def test_logout_json_reports_partial_revocation_failure(monkeypatch: pytest.Monk
             revocation_error="Token revocation failed (HTTP 500).",
         ),
     )
+    monkeypatch.setattr(auth, "get_api_key", lambda: None)
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
     result = CliRunner().invoke(auth.logout, ["--json"])
 
     assert result.exit_code == 3
     assert json.loads(result.output) == {
         "authenticated": False,
+        "method": None,
+        "source": None,
         "local_credentials_cleared": True,
+        "environment_credential_present": False,
         "server_revoked": False,
         "error": "Token revocation failed (HTTP 500).",
+    }
+
+
+def test_logout_json_reports_remaining_environment_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tavily_cli.commands import auth
+    from tavily_cli.config import ClearCredentialsResult
+
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-environment-secret")
+    monkeypatch.setattr(
+        auth,
+        "clear_credentials",
+        lambda: ClearCredentialsResult(
+            local_credentials_cleared=True,
+            server_revoked=None,
+        ),
+    )
+
+    logout_result = CliRunner().invoke(auth.logout, ["--json"])
+    auth_result = CliRunner().invoke(auth.auth_status, ["--json"])
+
+    assert logout_result.exit_code == 0
+    logout_payload = json.loads(logout_result.output)
+    assert logout_payload == {
+        "authenticated": True,
+        "method": "env",
+        "source": "TAVILY_API_KEY environment variable",
+        "local_credentials_cleared": True,
+        "environment_credential_present": True,
+        "warning": auth._ENV_CREDENTIAL_WARNING,
+    }
+    assert "tvly-environment-secret" not in logout_result.output
+    assert json.loads(auth_result.output) == {
+        "authenticated": True,
+        "method": "env",
+        "source": "TAVILY_API_KEY environment variable",
+    }
+
+
+def test_logout_json_reports_unauthenticated_after_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tavily_cli.commands import auth
+    from tavily_cli.config import ClearCredentialsResult
+
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setattr(auth, "get_api_key", lambda: None)
+    monkeypatch.setattr(
+        auth,
+        "clear_credentials",
+        lambda: ClearCredentialsResult(
+            local_credentials_cleared=True,
+            server_revoked=None,
+        ),
+    )
+
+    result = CliRunner().invoke(auth.logout, ["--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {
+        "authenticated": False,
+        "method": None,
+        "source": None,
+        "local_credentials_cleared": True,
+        "environment_credential_present": False,
     }
 
 
