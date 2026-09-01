@@ -211,6 +211,26 @@ def test_detect_pipx_receipt_preserves_custom_home(tmp_path: Path) -> None:
     )
 
 
+def test_detect_pipx_suffixed_install_uses_active_environment_name(tmp_path: Path) -> None:
+    pipx_home = tmp_path / "custom-pipx"
+    environment = pipx_home / "venvs" / "tavily-cli-old"
+    environment.mkdir(parents=True)
+    (environment / "pipx_metadata.json").write_text("")
+
+    detected = detect_install(
+        distribution=FakeDistribution(),  # type: ignore[arg-type]
+        executable=environment / "bin" / "python",
+        prefix=environment,
+        which=lambda command: f"/tools/{command}",
+    )
+
+    assert detected == InstallInfo(
+        "pipx",
+        ("/tools/pipx", "upgrade", "tavily-cli-old"),
+        (("PIPX_HOME", str(pipx_home)),),
+    )
+
+
 def test_update_check_json_is_read_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update_module, "__version__", "1.0.0")
     monkeypatch.setattr(update_module, "fetch_latest_version", lambda: "1.1.0")

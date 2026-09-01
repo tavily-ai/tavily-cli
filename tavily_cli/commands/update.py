@@ -153,9 +153,12 @@ def detect_install(
     if (environment / "pipx_metadata.json").is_file() or "/pipx/venvs/" in path:
         pipx = which("pipx")
         manager_environment: tuple[tuple[str, str], ...] = ()
+        # sys.prefix is the active pipx venv. Its directory name includes any
+        # suffix and is the identifier accepted by `pipx upgrade`.
+        pipx_environment = environment.name
         if environment.parent.name.lower() == "venvs":
             manager_environment = (("PIPX_HOME", str(environment.parent.parent)),)
-        return InstallInfo("pipx", (pipx, "upgrade", PACKAGE_NAME) if pipx else None, manager_environment)
+        return InstallInfo("pipx", (pipx, "upgrade", pipx_environment) if pipx else None, manager_environment)
 
     if (environment / "uv-receipt.toml").is_file() or "/uv/tools/" in path:
         uv = which("uv")
