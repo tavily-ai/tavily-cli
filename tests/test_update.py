@@ -324,6 +324,46 @@ def test_detect_manager_refuses_unverified_binary_directory(
     assert variable in detected.blocked_reason
 
 
+@pytest.mark.parametrize(
+    ("environment", "process_environment"),
+    [
+        (Path("/home/user/.cache/uv/archive-v0/cache-id"), {}),
+        (
+            Path("/tmp/custom-uv-cache/future-layout/cache-id"),
+            {"UV_CACHE_DIR": "/tmp/custom-uv-cache"},
+        ),
+    ],
+)
+def test_detect_uvx_cache_environment_refuses_mutation(
+    environment: Path, process_environment: dict[str, str]
+) -> None:
+    detected = detect_install(
+        distribution=FakeDistribution(installer="uv"),  # type: ignore[arg-type]
+        executable=environment / "bin" / "python",
+        prefix=environment,
+        process_environment=process_environment,
+        which=lambda command: f"/tools/{command}",
+    )
+
+    assert detected == InstallInfo("uvx", None)
+
+
+def test_detect_uvx_takes_precedence_over_direct_url_install() -> None:
+    environment = Path("/home/user/.cache/uv/archive-v0/cache-id")
+    detected = detect_install(
+        distribution=FakeDistribution(
+            installer="uv",
+            direct_url=json.dumps({"url": "https://example.com/tavily-cli.whl"}),
+        ),  # type: ignore[arg-type]
+        executable=environment / "bin" / "python",
+        prefix=environment,
+        process_environment={},
+        which=lambda command: f"/tools/{command}",
+    )
+
+    assert detected == InstallInfo("uvx", None)
+
+
 def test_update_check_json_is_read_only(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update_module, "__version__", "1.0.0")
     monkeypatch.setattr(update_module, "fetch_latest_version", lambda: "1.1.0")
@@ -479,6 +519,24 @@ def test_update_reports_unsafe_manager_binary_directory(monkeypatch: pytest.Monk
         "error": {"message": reason, "stage": "install_method"},
         "ok": False,
     }
+
+
+def test_update_refuses_uvx_cache_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(update_module, "__version__", "1.0.0")
+    monkeypatch.setattr(update_module, "fetch_latest_version", lambda: "1.1.0")
+    monkeypatch.setattr(update_module, "detect_install", lambda: InstallInfo("uvx", None))
+    monkeypatch.setattr(
+        update_module.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("uvx cache environments must not be mutated"),
+    )
+
+    result = CliRunner().invoke(cli, ["update", "--json"])
+
+    assert result.exit_code == 1
+    output = json.loads(result.stdout)
+    assert output["error"]["stage"] == "install_method"
+    assert "rerun uvx" in output["error"]["message"]
 
 
 def test_update_failure_is_structured_and_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:

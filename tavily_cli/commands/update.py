@@ -149,6 +149,10 @@ def detect_install(
     python = (executable or Path(sys.executable)).absolute()
     environment = (prefix or Path(sys.prefix)).resolve()
     runtime_environment = os.environ if process_environment is None else process_environment
+    installer = (dist.read_text("INSTALLER") or "").strip().lower()
+
+    if installer == "uv" and _is_uvx_environment(environment, runtime_environment):
+        return InstallInfo("uvx", None)
 
     if _is_source_install(dist):
         return InstallInfo("source", None)
@@ -187,7 +191,6 @@ def detect_install(
         command = (uv, "tool", "upgrade", PACKAGE_NAME) if uv and blocked_reason is None else None
         return InstallInfo("uv", command, tuple(manager_environment), blocked_reason)
 
-    installer = (dist.read_text("INSTALLER") or "").strip().lower()
     if installer == "uv":
         uv = which("uv")
         command = (uv, "pip", "install", "--python", str(python), "--upgrade", PACKAGE_NAME) if uv else None
@@ -239,6 +242,30 @@ def _missing_manager_bin_dir_message(manager: str, variable: str) -> str:
     )
 
 
+def _is_uvx_environment(environment: Path, process_environment: Mapping[str, str]) -> bool:
+    try:
+        active_environment = environment.resolve()
+    except (OSError, RuntimeError):
+        active_environment = environment.absolute()
+
+    configured_cache = process_environment.get("UV_CACHE_DIR")
+    if configured_cache:
+        try:
+            cache_dir = Path(configured_cache).expanduser().resolve()
+        except (OSError, RuntimeError):
+            cache_dir = Path(configured_cache).expanduser().absolute()
+        if active_environment == cache_dir or cache_dir in active_environment.parents:
+            return True
+
+    # uvx currently stores reusable run environments under an environments-vN
+    # entry that resolves into an archive-vN cache directory.
+    for part in active_environment.parts:
+        bucket, separator, version = part.lower().rpartition("-v")
+        if separator and bucket in {"archive", "environments"} and version.isdigit():
+            return True
+    return False
+
+
 def _is_source_install(distribution: metadata.Distribution) -> bool:
     raw = distribution.read_text("direct_url.json")
     if not raw:
@@ -278,6 +305,11 @@ def _installed_version() -> str:
 def _unsupported_install_message(method: str) -> str:
     if method == "source":
         return "This is a source or direct-URL installation. Update it from its original source."
+    if method == "uvx":
+        return (
+            "This CLI is running in a uvx cache environment and cannot update itself in place. "
+            "Exit and rerun uvx with the desired Tavily CLI version instead."
+        )
     if method in {"uv", "pipx"}:
         return f"This installation is managed by {method}, but {method} is not available on PATH."
     return "Could not determine how Tavily CLI was installed. Update it with the original package manager."
