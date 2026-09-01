@@ -335,6 +335,97 @@ def test_logout_json_reports_partial_revocation_failure(monkeypatch: pytest.Monk
     }
 
 
+@pytest.mark.parametrize(
+    ("arguments", "headless"),
+    [
+        (["--json", "--no-browser"], False),
+        (["--json"], True),
+    ],
+)
+def test_json_headless_login_emits_authorization_url_on_stderr(
+    arguments: list[str],
+    headless: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tavily_cli import oauth
+    from tavily_cli.commands import auth
+    from tavily_cli.oauth import OAuthSession, OAuthTokens
+
+    session = OAuthSession(
+        tokens=OAuthTokens(
+            access_token="access-1",
+            refresh_token="refresh-1",
+            expires_at=expires_at_from_now(3600),
+        ),
+        client=RegisteredClient(
+            client_id="cid",
+            client_secret=None,
+            token_endpoint_auth_method="none",
+            redirect_uri="http://127.0.0.1:9999/callback",
+        ),
+    )
+
+    monkeypatch.setattr(oauth, "looks_headless", lambda: headless)
+    monkeypatch.setattr(auth, "save_oauth_session", lambda value: None)
+
+    def complete_login(*, open_browser: bool, on_status: object) -> OAuthSession:
+        assert open_browser is False
+        assert callable(on_status)
+        on_status("https://mcp.tavily.com/authorize?client_id=cid")
+        return session
+
+    monkeypatch.setattr(oauth, "run_browser_login", complete_login)
+
+    result = CliRunner().invoke(auth.login, arguments)
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "authenticated": True,
+        "method": "oauth",
+        "detail": f"Token stored in {auth.CONFIG_FILE}",
+    }
+    assert json.loads(result.stderr) == {
+        "event": "authorization_required",
+        "authorization_url": "https://mcp.tavily.com/authorize?client_id=cid",
+    }
+
+
+def test_json_browser_login_keeps_stderr_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tavily_cli import oauth
+    from tavily_cli.commands import auth
+    from tavily_cli.oauth import OAuthSession, OAuthTokens
+
+    session = OAuthSession(
+        tokens=OAuthTokens(
+            access_token="access-1",
+            refresh_token="refresh-1",
+            expires_at=expires_at_from_now(3600),
+        ),
+        client=RegisteredClient(
+            client_id="cid",
+            client_secret=None,
+            token_endpoint_auth_method="none",
+            redirect_uri="http://127.0.0.1:9999/callback",
+        ),
+    )
+
+    monkeypatch.setattr(oauth, "looks_headless", lambda: False)
+    monkeypatch.setattr(auth, "save_oauth_session", lambda value: None)
+
+    def complete_login(*, open_browser: bool, on_status: object) -> OAuthSession:
+        assert open_browser is True
+        assert on_status is None
+        return session
+
+    monkeypatch.setattr(oauth, "run_browser_login", complete_login)
+
+    result = CliRunner().invoke(auth.login, ["--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["authenticated"] is True
+    assert result.stderr == ""
+
+
 def test_api_key_and_oauth_replace_each_other(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tavily_cli import config
     from tavily_cli.oauth import OAuthSession, OAuthTokens

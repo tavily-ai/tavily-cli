@@ -42,6 +42,12 @@ def login(ctx: click.Context, api_key: str | None, no_browser: bool, json_flag: 
 
     def _show_url(url: str) -> None:
         if json_mode:
+            import json as json_mod
+
+            click.echo(json_mod.dumps({
+                "event": "authorization_required",
+                "authorization_url": url,
+            }), err=True)
             return
         err_console.print()
         if open_browser:
@@ -61,7 +67,10 @@ def login(ctx: click.Context, api_key: str | None, no_browser: bool, json_flag: 
 
     try:
         if json_mode:
-            session = run_browser_login(open_browser=open_browser, on_status=None)
+            session = run_browser_login(
+                open_browser=open_browser,
+                on_status=_show_url if not open_browser else None,
+            )
         else:
             with err_console.status("[#5CD9E6]Waiting for browser authorization...[/#5CD9E6]", spinner="dots"):
                 session = run_browser_login(open_browser=open_browser, on_status=_show_url)
