@@ -44,6 +44,14 @@ def test_token_expiry_skew() -> None:
     assert token_is_expired(None)
 
 
+@pytest.mark.parametrize(
+    "expires_at",
+    ["bad", True, [], {}, float("nan"), float("inf"), float("-inf")],
+)
+def test_malformed_token_expiry_is_expired(expires_at: object) -> None:
+    assert token_is_expired(expires_at)
+
+
 def test_authorize_url_includes_pkce_and_resource() -> None:
     metadata = OAuthMetadata(
         authorization_endpoint="https://mcp.tavily.com/authorize",
@@ -639,7 +647,7 @@ def test_save_oauth_session_keeps_previous_and_cleans_replacement_on_failure(
     assert revocation_attempts[1]["client_id"] == "new-client"
 
 
-def test_refresh_persists_tokens_without_revoking_active_session(
+def test_malformed_expiry_refreshes_without_revoking_active_session(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -651,7 +659,7 @@ def test_refresh_persists_tokens_without_revoking_active_session(
     previous = {
         "access_token": "old-access",
         "refresh_token": "same-refresh",
-        "expires_at": 0,
+        "expires_at": "bad",
         "token_type": "Bearer",
         "client_id": "same-client",
         "client_secret": None,
@@ -683,6 +691,19 @@ def test_refresh_persists_tokens_without_revoking_active_session(
     assert stored["access_token"] == "new-access"
     assert stored["refresh_token"] == "same-refresh"
     assert stored["client_id"] == "same-client"
+
+
+def test_malformed_expiry_without_refresh_is_invalid() -> None:
+    from tavily_cli import config
+
+    access_token = config._get_oauth_access_token({
+        "oauth": {
+            "access_token": "old-access",
+            "expires_at": "bad",
+        },
+    })
+
+    assert access_token is None
 
 
 def test_api_key_login_json_reports_replacement_revocation_failure(monkeypatch: pytest.MonkeyPatch) -> None:

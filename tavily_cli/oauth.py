@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import secrets
 import string
 import threading
@@ -92,8 +93,13 @@ def expires_at_from_now(expires_in: int | None, *, now: float | None = None) -> 
     return (now if now is not None else time.time()) + lifetime - _EXPIRY_SKEW_SECONDS
 
 
-def token_is_expired(expires_at: float | None, *, now: float | None = None) -> bool:
-    if expires_at is None:
+def token_is_expired(expires_at: object, *, now: float | None = None) -> bool:
+    """Treat missing, malformed, and non-finite stored expiries as expired."""
+    if (
+        isinstance(expires_at, bool)
+        or not isinstance(expires_at, (int, float))
+        or not math.isfinite(expires_at)
+    ):
         return True
     return (now if now is not None else time.time()) >= expires_at
 
