@@ -215,6 +215,18 @@ tvly auth --json
 tvly extract https://example.com --json
 tvly update --check --json
 
+# Durable artifacts: format follows the extension
+tvly search "query" -o results.json
+tvly extract https://example.com -o article.md
+
+# Generate authoritative JSON under .tavily/<command>/
+tvly search "query" --save
+
+# Keep agent stdout bounded and inspect only the fields you need
+summary=$(tvly search "query" --save --json)
+artifact=$(printf '%s' "$summary" | jq -r '.artifacts[0]')
+jq '.results[:5] | map({title, url, score})' "$artifact"
+
 # Read input from stdin with "-"
 echo "What is the latest funding for Anthropic?" | tvly search - --json
 echo "Research question" | tvly research - --json
@@ -229,6 +241,10 @@ tvly --version         # show version
 tvly --status          # show version + auth status
 tvly --status --json   # structured status
 ```
+
+`-o` writes Markdown for `.md`/`.markdown` paths and JSON otherwise. `--json`
+always forces JSON. Saved commands print only a short summary and the artifact
+path; existing files are preserved unless `--force` is provided.
 
 ### Exit Codes
 
@@ -259,7 +275,9 @@ tvly --status --json   # structured status
 | `--include-raw-content` | Include full page (`markdown` or `text`) |
 | `--include-images` | Include image results |
 | `--chunks-per-source` | Chunks per source (advanced/fast depth only) |
-| `-o` / `--output` | Save output to file |
+| `-o` / `--output` | Save JSON (`.json`) or Markdown (`.md`) |
+| `--save` | Save JSON to a generated path under `.tavily/search/` |
+| `--force` | Overwrite an existing `--output` file |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly update`
@@ -287,7 +305,9 @@ automation can distinguish an available release from a supported self-update.
 | `--format` | `markdown` (default) or `text` |
 | `--include-images` | Include image URLs |
 | `--timeout` | Max wait (1-60 seconds) |
-| `-o` / `--output` | Save output to file |
+| `-o` / `--output` | Save JSON (`.json`) or complete Markdown (`.md`) |
+| `--save` | Save JSON to a generated path under `.tavily/extract/` |
+| `--force` | Overwrite an existing `--output` file |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly crawl`
@@ -324,7 +344,9 @@ automation can distinguish an available release from a supported self-update.
 | `--exclude-paths` | Regex patterns for paths to exclude |
 | `--allow-external` | Include external links |
 | `--timeout` | Max wait (10-150 seconds) |
-| `-o` / `--output` | Save output to file |
+| `-o` / `--output` | Save JSON (`.json`) or Markdown (`.md`) |
+| `--save` | Save JSON to a generated path under `.tavily/map/` |
+| `--force` | Overwrite an existing `--output` file |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly research <query>` / `tvly research run <query>`
@@ -338,7 +360,9 @@ automation can distinguish an available release from a supported self-update.
 | `--citation-format` | `numbered`, `mla`, `apa`, `chicago` |
 | `--poll-interval` | Seconds between checks (default: 10) |
 | `--timeout` | Max wait seconds (default: 600) |
-| `-o` / `--output` | Save output to file |
+| `-o` / `--output` | Save JSON (`.json`) or Markdown (`.md`) |
+| `--save` | Save `report.md` and `report.json` under `.tavily/research/` |
+| `--force` | Overwrite existing output files |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly research status`
@@ -347,7 +371,7 @@ Check research task status by request ID. Supports `--client-name`.
 
 ### `tvly research poll`
 
-Poll until completion and return results. Same `--poll-interval`, `--timeout`, `-o`, and `--client-name` options as `run`.
+Poll until completion and return results. Same `--poll-interval`, `--timeout`, `-o`, `--save`, `--force`, and `--client-name` options as `run`.
 
 ## Environment Variables
 

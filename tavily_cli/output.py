@@ -1,4 +1,4 @@
-"""Output formatting: Rich for humans, JSON for agents, -o for file output.
+"""Output formatting: Rich for humans and durable artifacts for agents.
 
 All human-readable rendering treats result fields (titles, URLs, snippets,
 answers, page content, source lists, error text) as untrusted: they originate
@@ -11,6 +11,11 @@ and rendered via ``Text``/validated links rather than markup-bearing f-strings.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+from collections.abc import Callable
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -90,38 +95,294 @@ def _domain(url: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# JSON / file emit
+# JSON / artifact emit
 # ---------------------------------------------------------------------------
 
-def emit(data: Any, *, json_mode: bool, output_file: str | None = None, pretty: bool = False) -> None:
+_MARKDOWN_SUFFIXES = {".md", ".markdown"}
+
+
+def validate_artifact_options(
+    *,
+    output_file: str | None,
+    save: bool,
+    force: bool,
+) -> None:
+    """Validate shared artifact flags before making an API request."""
+    if output_file and save:
+        raise click.UsageError("Use either --output or --save, not both.")
+    if force and not (output_file or save):
+        raise click.UsageError("--force requires --output or --save.")
+    if output_file:
+        path = Path(output_file)
+        if not path.parent.exists():
+            raise click.ClickException(f"Output directory does not exist: {path.parent}")
+        if path.exists() and not force:
+            raise click.ClickException(f"Refusing to overwrite existing file: {path}. Use --force to overwrite.")
+
+
+def _json_text(data: Any, *, pretty: bool) -> str:
+    return json.dumps(data, indent=2 if pretty else None, ensure_ascii=False) + "\n"
+
+
+def _atomic_write_text(path: Path, text: str, *, force: bool, create_parents: bool = False) -> None:
+    """Atomically publish a complete text file, refusing collisions by default."""
+    parent = path.parent
+    if create_parents:
+        parent.mkdir(parents=True, exist_ok=True)
+    elif not parent.exists():
+        raise click.ClickException(f"Output directory does not exist: {parent}")
+
+    if path.exists() and not force:
+        raise click.ClickException(f"Refusing to overwrite existing file: {path}. Use --force to overwrite.")
+
+    temp_path: Path | None = None
+    try:
+        fd, raw_temp_path = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=parent)
+        temp_path = Path(raw_temp_path)
+        with os.fdopen(fd, "w", encoding="utf-8") as temp_file:
+            temp_file.write(text)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+
+        if force:
+            os.replace(temp_path, path)
+        else:
+            # A hard-link publish is atomic and fails if another process creates
+            # the destination between the preflight check and this operation.
+            os.link(temp_path, path)
+            temp_path.unlink()
+        temp_path = None
+    except FileExistsError as exc:
+        raise click.ClickException(
+            f"Refusing to overwrite existing file: {path}. Use --force to overwrite."
+        ) from exc
+    except OSError as exc:
+        raise click.ClickException(f"Could not write artifact {path}: {exc}") from exc
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def _artifact_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def _print_artifact_summary(summary: str, paths: list[Path], *, json_mode: bool) -> None:
+    rendered_paths = [str(path) for path in paths]
+    if json_mode:
+        click.echo(json.dumps({"saved": True, "summary": summary, "artifacts": rendered_paths}))
+        return
+
+    click.echo(summary)
+    for path in rendered_paths:
+        click.echo(f"Artifact: {path}")
+
+
+def _save_result(
+    data: dict,
+    *,
+    command: str,
+    json_mode: bool,
+    output_file: str | None,
+    save: bool,
+    force: bool,
+    markdown_renderer: Callable[[dict], str],
+    summary: str,
+) -> bool:
+    """Save one command result and print a bounded artifact summary."""
+    if not output_file and not save:
+        return False
+
+    if save and command == "research":
+        output_dir = Path(".tavily") / command / _artifact_timestamp()
+        markdown_path = output_dir / "report.md"
+        json_path = output_dir / "report.json"
+        _atomic_write_text(markdown_path, markdown_renderer(data), force=force, create_parents=True)
+        _atomic_write_text(json_path, _json_text(data, pretty=True), force=force, create_parents=True)
+        _print_artifact_summary(summary, [markdown_path, json_path], json_mode=json_mode)
+        return True
+
+    path = Path(output_file) if output_file else Path(".tavily") / command / f"{_artifact_timestamp()}.json"
+    use_markdown = not json_mode and path.suffix.lower() in _MARKDOWN_SUFFIXES
+    text = markdown_renderer(data) if use_markdown else _json_text(data, pretty=True)
+    _atomic_write_text(path, text, force=force, create_parents=save)
+    _print_artifact_summary(summary, [path], json_mode=json_mode)
+    return True
+
+
+def emit(
+    data: Any,
+    *,
+    json_mode: bool,
+    output_file: str | None = None,
+    pretty: bool = False,
+    force: bool = True,
+) -> None:
     """Write JSON data to stdout (or a file). Used in --json mode.
 
     json.dumps escapes control characters (incl. ESC) as \\uXXXX, so this path
     is safe from terminal-escape injection without extra stripping.
     """
-    text = json.dumps(data, indent=2 if pretty else None, ensure_ascii=False)
+    text = _json_text(data, pretty=pretty)
     if output_file:
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(text + "\n")
+        _atomic_write_text(Path(output_file), text, force=force)
         err_console.print(f"Output saved to {output_file}")
     else:
-        click.echo(text)
+        click.echo(text, nl=False)
+
+
+def _one_line(value: Any) -> str:
+    return " ".join(sanitize_control(value).splitlines()).strip()
+
+
+def _structured_markdown(value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        return f"```json\n{json.dumps(value, indent=2, ensure_ascii=False)}\n```"
+    return sanitize_control(value)
+
+
+def _search_markdown(data: dict) -> str:
+    lines = ["# Search Results"]
+    answer = data.get("answer")
+    if answer:
+        lines.extend(["", "## Answer", "", _structured_markdown(answer)])
+
+    results = data.get("results") or []
+    if results:
+        lines.extend(["", "## Results"])
+        for index, result in enumerate(results, 1):
+            title = _one_line(result.get("title", "Untitled")) or "Untitled"
+            lines.extend(["", f"### {index}. {title}", ""])
+            if result.get("url"):
+                lines.append(f"Source: {sanitize_control(result['url'])}")
+            if result.get("score") is not None:
+                lines.append(f"Score: {sanitize_control(result['score'])}")
+            if result.get("content"):
+                lines.extend(["", _structured_markdown(result["content"])])
+            if result.get("raw_content"):
+                lines.extend(["", "#### Full content", "", _structured_markdown(result["raw_content"])])
+    elif not answer:
+        lines.extend(["", "No results found."])
+
+    images = data.get("images") or []
+    if images:
+        lines.extend(["", "## Images", ""])
+        for image in images:
+            if isinstance(image, dict):
+                url = sanitize_control(image.get("url", ""))
+                description = _one_line(image.get("description", ""))
+                lines.append(f"- {url}" + (f" - {description}" if description else ""))
+            else:
+                lines.append(f"- {sanitize_control(image)}")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _extract_markdown(data: dict) -> str:
+    lines = ["# Extracted Content"]
+    results = data.get("results") or []
+    if not results:
+        lines.extend(["", "No content extracted."])
+
+    for index, result in enumerate(results, 1):
+        url = sanitize_control(result.get("url", ""))
+        lines.extend(["", f"## {index}. {_one_line(url) or 'Untitled'}", ""])
+        if url:
+            lines.extend([f"Source: {url}", ""])
+        raw_content = result.get("raw_content")
+        lines.append(_structured_markdown(raw_content) if raw_content else "No content.")
+
+        images = result.get("images") or []
+        if images:
+            lines.extend(["", "### Images", ""])
+            lines.extend(f"- {sanitize_control(image)}" for image in images)
+
+    failed = data.get("failed_results") or []
+    if failed:
+        lines.extend(["", "## Failed Extractions", ""])
+        for item in failed:
+            lines.append(
+                f"- {sanitize_control(item.get('url', ''))}: {sanitize_control(item.get('error', 'Unknown error'))}"
+            )
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _map_markdown(data: dict) -> str:
+    lines = ["# URL Map"]
+    if data.get("base_url"):
+        lines.extend(["", f"Base URL: {sanitize_control(data['base_url'])}"])
+    results = data.get("results") or []
+    if results:
+        lines.append("")
+        for result in results:
+            url = result.get("url", "") if isinstance(result, dict) else result
+            lines.append(f"- {sanitize_control(url)}")
+    else:
+        lines.extend(["", "No URLs found."])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _research_markdown(data: dict) -> str:
+    lines = ["# Research Report"]
+    status = data.get("status", "unknown")
+    lines.extend(["", f"Status: {sanitize_control(status)}"])
+    if data.get("request_id"):
+        lines.append(f"Request ID: {sanitize_control(data['request_id'])}")
+    if data.get("error"):
+        lines.extend(["", f"Error: {sanitize_control(data['error'])}"])
+
+    content = data.get("content")
+    if content:
+        lines.extend(["", _structured_markdown(content)])
+
+    sources = data.get("sources") or []
+    if sources:
+        lines.extend(["", "## Sources", ""])
+        for index, source in enumerate(sources, 1):
+            if isinstance(source, dict):
+                title = _one_line(source.get("title", ""))
+                url = sanitize_control(source.get("url", ""))
+                label = title or url or f"Source {index}"
+                lines.append(f"{index}. {label}" + (f" - {url}" if url and url != label else ""))
+            else:
+                lines.append(f"{index}. {sanitize_control(source)}")
+
+    return "\n".join(lines).rstrip() + "\n"
 
 
 # ---------------------------------------------------------------------------
 # Search
 # ---------------------------------------------------------------------------
 
-def print_search_results(data: dict, *, json_mode: bool, output_file: str | None = None) -> None:
+def print_search_results(
+    data: dict,
+    *,
+    json_mode: bool,
+    output_file: str | None = None,
+    save: bool = False,
+    force: bool = False,
+) -> None:
+    results = data.get("results") or []
+    if _save_result(
+        data,
+        command="search",
+        json_mode=json_mode,
+        output_file=output_file,
+        save=save,
+        force=force,
+        markdown_renderer=_search_markdown,
+        summary=f"Saved {len(results)} search result{'s' if len(results) != 1 else ''}.",
+    ):
+        return
+
     if json_mode:
-        emit(data, json_mode=True, output_file=output_file, pretty=True)
+        emit(data, json_mode=True, pretty=True)
         return
 
-    if output_file:
-        emit(data, json_mode=True, output_file=output_file, pretty=True)
-        return
-
-    results = data.get("results", [])
     answer = data.get("answer")
     response_time = data.get("response_time")
 
@@ -179,13 +440,31 @@ def print_search_results(data: dict, *, json_mode: bool, output_file: str | None
 # Extract
 # ---------------------------------------------------------------------------
 
-def print_extract_results(data: dict, *, json_mode: bool, output_file: str | None = None) -> None:
-    if json_mode or output_file:
-        emit(data, json_mode=True, output_file=output_file, pretty=True)
+def print_extract_results(
+    data: dict,
+    *,
+    json_mode: bool,
+    output_file: str | None = None,
+    save: bool = False,
+    force: bool = False,
+) -> None:
+    results = data.get("results") or []
+    failed = data.get("failed_results") or []
+    if _save_result(
+        data,
+        command="extract",
+        json_mode=json_mode,
+        output_file=output_file,
+        save=save,
+        force=force,
+        markdown_renderer=_extract_markdown,
+        summary=f"Saved {len(results)} extraction{'s' if len(results) != 1 else ''} ({len(failed)} failed).",
+    ):
         return
 
-    results = data.get("results", [])
-    failed = data.get("failed_results", [])
+    if json_mode:
+        emit(data, json_mode=True, pretty=True)
+        return
 
     for r in results:
         url = r.get("url", "")
@@ -202,6 +481,9 @@ def print_extract_results(data: dict, *, json_mode: bool, output_file: str | Non
         console.print()
         if raw:
             console.print(Markdown(sanitize_control(raw[:3000])), width=min(console.width, 100))
+            if len(raw) > 3000:
+                console.print()
+                console.print("  [dim]Content truncated. Use --save or -o article.md for the complete extraction.[/dim]")
         else:
             console.print("  [dim]No content[/dim]")
         console.print()
@@ -301,12 +583,31 @@ def _save_crawl_to_dir(data: dict, output_dir: str) -> None:
 # Map
 # ---------------------------------------------------------------------------
 
-def print_map_results(data: dict, *, json_mode: bool, output_file: str | None = None) -> None:
-    if json_mode or output_file:
-        emit(data, json_mode=True, output_file=output_file, pretty=True)
+def print_map_results(
+    data: dict,
+    *,
+    json_mode: bool,
+    output_file: str | None = None,
+    save: bool = False,
+    force: bool = False,
+) -> None:
+    results = data.get("results") or []
+    if _save_result(
+        data,
+        command="map",
+        json_mode=json_mode,
+        output_file=output_file,
+        save=save,
+        force=force,
+        markdown_renderer=_map_markdown,
+        summary=f"Saved {len(results)} URL{'s' if len(results) != 1 else ''}.",
+    ):
         return
 
-    results = data.get("results", [])
+    if json_mode:
+        emit(data, json_mode=True, pretty=True)
+        return
+
     base_url = data.get("base_url", "")
 
     tree = Tree(_safe_text(base_url, style="bold"))
@@ -323,14 +624,33 @@ def print_map_results(data: dict, *, json_mode: bool, output_file: str | None = 
 # Research
 # ---------------------------------------------------------------------------
 
-def print_research_result(data: dict, *, json_mode: bool, output_file: str | None = None) -> None:
-    if json_mode or output_file:
-        emit(data, json_mode=True, output_file=output_file, pretty=True)
+def print_research_result(
+    data: dict,
+    *,
+    json_mode: bool,
+    output_file: str | None = None,
+    save: bool = False,
+    force: bool = False,
+) -> None:
+    sources = data.get("sources") or []
+    if _save_result(
+        data,
+        command="research",
+        json_mode=json_mode,
+        output_file=output_file,
+        save=save,
+        force=force,
+        markdown_renderer=_research_markdown,
+        summary=f"Saved research report with {len(sources)} source{'s' if len(sources) != 1 else ''}.",
+    ):
+        return
+
+    if json_mode:
+        emit(data, json_mode=True, pretty=True)
         return
 
     status = data.get("status", "unknown")
     content = data.get("content", "")
-    sources = data.get("sources", [])
 
     if status != "completed":
         status_line = Text()
