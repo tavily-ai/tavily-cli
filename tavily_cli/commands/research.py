@@ -9,7 +9,7 @@ import time
 import click
 from rich.markup import escape
 
-from tavily_cli.common import client_name_option, handle_api_error, json_option, sanitize_control
+from tavily_cli.common import client_name_option, handle_api_error, sanitize_control
 
 
 class ResearchGroup(click.Group):
@@ -164,8 +164,8 @@ def run(
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
 
-    require_api_key_friendly("research")
-    client = get_client(client_name=client_name)
+    require_api_key_friendly("research", json_mode=json_mode)
+    client = get_client(client_name=client_name, json_mode=json_mode)
 
     schema = None
     if output_schema:
@@ -282,8 +282,8 @@ def status(ctx: click.Context, request_id: str, json_flag: bool, client_name: st
     from tavily_cli.output import emit
 
     json_mode = _resolve_json(ctx, json_flag)
-    require_api_key_friendly("research status")
-    client = get_client(client_name=client_name)
+    require_api_key_friendly("research status", json_mode=json_mode)
+    client = get_client(client_name=client_name, json_mode=json_mode)
 
     try:
         response = client.get_research(request_id)
@@ -328,8 +328,8 @@ def poll(
     from tavily_cli.theme import err_console
 
     json_mode = _resolve_json(ctx, json_flag)
-    require_api_key_friendly("research poll")
-    client = get_client(client_name=client_name)
+    require_api_key_friendly("research poll", json_mode=json_mode)
+    client = get_client(client_name=client_name, json_mode=json_mode)
 
     elapsed = 0
     response = {}

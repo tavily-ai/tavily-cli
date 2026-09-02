@@ -105,8 +105,8 @@ def _call_mcp_tool(
         if "error" in data:
             raise RuntimeError(data["error"].get("message", str(data["error"])))
         return data.get("result", data)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"Unexpected MCP response: {text[:500]}")
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Unexpected MCP response: {text[:500]}") from e
 
 
 class McpTavilyClient:

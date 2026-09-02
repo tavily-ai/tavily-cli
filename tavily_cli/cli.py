@@ -8,6 +8,7 @@ from tavily_cli import __version__
 from tavily_cli.commands.auth import auth_status, login, logout
 from tavily_cli.commands.crawl import crawl
 from tavily_cli.commands.extract import extract
+from tavily_cli.commands.init import init_command
 from tavily_cli.commands.map_cmd import map_urls
 from tavily_cli.commands.research import research
 from tavily_cli.commands.search import search
@@ -52,11 +53,16 @@ def _print_welcome() -> None:
     from rich.console import Console
     from rich.text import Text
 
+    from tavily_cli.common import handle_oauth_refresh_error
     from tavily_cli.config import get_api_key
+    from tavily_cli.oauth import OAuthError
     from tavily_cli.theme import LOGO
 
     console = Console(stderr=True)
-    key = get_api_key()
+    try:
+        key = get_api_key()
+    except OAuthError as e:
+        handle_oauth_refresh_error(e, False)
 
     # Logo + version
     console.print()
@@ -69,9 +75,9 @@ def _print_welcome() -> None:
         source = _auth_source(key)
         console.print(f"  [#9BC0AE]>[/#9BC0AE] Authenticated via {source}")
     else:
-        console.print(f"  [#FAA2FB]>[/#FAA2FB] Not authenticated")
-        console.print(f"    [dim]search and extract work without a key (with a rate-limit cap).[/dim]")
-        console.print(f"    [dim]Run:[/dim] tvly login [dim]to remove the cap.[/dim]")
+        console.print("  [#FAA2FB]>[/#FAA2FB] Not authenticated")
+        console.print("    [dim]search and extract work without a key (with a rate-limit cap).[/dim]")
+        console.print("    [dim]Run:[/dim] tvly login [dim]to remove the cap.[/dim]")
 
     console.print()
 
@@ -103,6 +109,7 @@ def _print_welcome() -> None:
 def _auth_source(key: str) -> str:
     """Describe how the user is authenticated."""
     import os
+
     from tavily_cli.config import is_oauth_token
 
     if os.environ.get("TAVILY_API_KEY"):
@@ -116,9 +123,14 @@ def _print_status(json_output: bool) -> None:
     """Show version + auth status."""
     import json
 
+    from tavily_cli.common import handle_oauth_refresh_error
     from tavily_cli.config import get_api_key
+    from tavily_cli.oauth import OAuthError
 
-    key = get_api_key()
+    try:
+        key = get_api_key()
+    except OAuthError as e:
+        handle_oauth_refresh_error(e, json_output)
     authenticated = key is not None
 
     if json_output:
@@ -142,6 +154,7 @@ def _print_status(json_output: bool) -> None:
 cli.add_command(login)
 cli.add_command(logout)
 cli.add_command(auth_status)
+cli.add_command(init_command)
 cli.add_command(search)
 cli.add_command(extract)
 cli.add_command(crawl)
