@@ -18,7 +18,23 @@ MCP_URL = "https://mcp.tavily.com/mcp"
 
 def _raise_if_api_error(parsed: dict) -> None:
     """Raise TavilyAPIError if the parsed response contains an error."""
-    if not isinstance(parsed, dict) or "error" not in parsed:
+    if not isinstance(parsed, dict):
+        return
+    if (
+        isinstance(parsed.get("code"), str)
+        and isinstance(parsed.get("message"), str)
+        and parsed.get("auth_mode") == "keyless"
+    ):
+        from tavily import TavilyKeylessLimitError
+
+        raise TavilyKeylessLimitError(
+            parsed["message"],
+            code=parsed["code"],
+            window=parsed.get("window"),
+            retry_after_seconds=parsed.get("retry_after_seconds"),
+            next_actions=parsed.get("next_actions"),
+        )
+    if "error" not in parsed or parsed.get("status") == "failed":
         return
     from tavily_cli.common import TavilyAPIError
     detail = parsed.get("detail", {})

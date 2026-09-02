@@ -22,6 +22,7 @@ from tavily_cli.common import client_name_option, handle_api_error, json_option
 @click.option("--output", "-o", "output_file", default=None, help="Save as JSON (.json) or Markdown (.md).")
 @click.option("--save", is_flag=True, default=False, help="Save JSON under .tavily/map/.")
 @click.option("--force", is_flag=True, default=False, help="Overwrite an existing output file.")
+@click.option("--jsonl", is_flag=True, default=False, help="Output one discovered URL per JSON line.")
 @client_name_option
 @json_option
 def map_urls(
@@ -39,6 +40,7 @@ def map_urls(
     output_file: str | None,
     save: bool,
     force: bool,
+    jsonl: bool,
     client_name: str | None,
     json_output: bool,
 ) -> None:
@@ -51,14 +53,18 @@ def map_urls(
     from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import print_map_results, validate_artifact_options
 
+    if json_output and jsonl:
+        raise click.UsageError("Use either --json or --jsonl, not both.")
+    machine_mode = json_output or jsonl
+
     validate_artifact_options(
         output_file=output_file,
         save=save,
         force=force,
     )
 
-    require_api_key_friendly("map", json_mode=json_output)
-    client = get_client(client_name=client_name, json_mode=json_output)
+    require_api_key_friendly("map", json_mode=machine_mode)
+    client = get_client(client_name=client_name, json_mode=machine_mode)
 
     kwargs: dict = {"url": url}
     if max_depth is not None:
@@ -85,14 +91,15 @@ def map_urls(
     from tavily_cli.theme import spinner
 
     try:
-        with spinner(f"Mapping {url}...", json_mode=json_output):
+        with spinner(f"Mapping {url}...", json_mode=machine_mode):
             response = client.map(**kwargs)
     except Exception as e:
-        handle_api_error(e, json_output)
+        handle_api_error(e, machine_mode)
 
     print_map_results(
         response,
         json_mode=json_output,
+        jsonl_mode=jsonl,
         output_file=output_file,
         save=save,
         force=force,

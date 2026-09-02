@@ -451,7 +451,12 @@ def test_update_check_failure_is_structured(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert result.exit_code == 4
     assert json.loads(result.stdout) == {
-        "error": {"message": "PyPI unavailable", "stage": "check"},
+        "error": {
+            "code": "update_check_failed",
+            "message": "PyPI unavailable",
+            "retryable": True,
+            "stage": "check",
+        },
         "ok": False,
     }
 
@@ -468,7 +473,12 @@ def test_install_detection_failure_is_not_reported_as_network_error(monkeypatch:
 
     assert result.exit_code == 1
     output = json.loads(result.stdout)
-    assert output["error"] == {"message": "Package metadata unavailable", "stage": "install_method"}
+    assert output["error"] == {
+        "code": "update_unsupported_install",
+        "message": "Package metadata unavailable",
+        "retryable": False,
+        "stage": "install_method",
+    }
 
 
 def test_update_does_nothing_when_current(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -556,7 +566,12 @@ def test_update_reports_unsafe_manager_binary_directory(monkeypatch: pytest.Monk
 
     assert result.exit_code == 1
     assert json.loads(result.stdout) == {
-        "error": {"message": reason, "stage": "install_method"},
+        "error": {
+            "code": "update_unsupported_install",
+            "message": reason,
+            "retryable": False,
+            "stage": "install_method",
+        },
         "ok": False,
     }
 
@@ -593,7 +608,15 @@ def test_update_failure_is_structured_and_sanitized(monkeypatch: pytest.MonkeyPa
 
     assert result.exit_code == 1
     output = json.loads(result.stdout)
-    assert output == {"error": {"message": "failed[2J", "stage": "update"}, "ok": False}
+    assert output == {
+        "error": {
+            "code": "update_failed",
+            "message": "failed[2J",
+            "retryable": True,
+            "stage": "update",
+        },
+        "ok": False,
+    }
 
 
 def test_update_verifies_package_manager_changed_version(monkeypatch: pytest.MonkeyPatch) -> None:

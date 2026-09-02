@@ -18,7 +18,7 @@ import httpx
 from packaging.version import InvalidVersion, Version
 
 from tavily_cli import __version__
-from tavily_cli.common import json_option, sanitize_control
+from tavily_cli.common import error_payload, json_option, sanitize_control
 
 PACKAGE_NAME = "tavily-cli"
 PYPI_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
@@ -352,7 +352,18 @@ def _result(*, current: str, latest: str, install: InstallInfo, updated: bool) -
 def _fail(stage: str, message: str, exit_code: int, json_output: bool) -> None:
     safe_message = sanitize_control(message)
     if json_output:
-        click.echo(json.dumps({"ok": False, "error": {"stage": stage, "message": safe_message}}, sort_keys=True))
+        code = {
+            "check": "update_check_failed",
+            "install_method": "update_unsupported_install",
+            "update": "update_failed",
+            "verify": "update_verification_failed",
+        }.get(stage, "update_failed")
+        click.echo(json.dumps(error_payload(
+            code,
+            safe_message,
+            stage=stage,
+            retryable=stage in {"check", "update"},
+        ), sort_keys=True))
     else:
         from rich.markup import escape
 

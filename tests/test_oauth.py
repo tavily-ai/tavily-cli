@@ -488,7 +488,13 @@ def test_logout_json_reports_partial_revocation_failure(monkeypatch: pytest.Monk
         "local_credentials_cleared": True,
         "environment_credential_present": False,
         "server_revoked": False,
-        "error": "Token revocation failed (HTTP 500).",
+        "ok": False,
+        "error": {
+            "code": "oauth_revocation_failed",
+            "message": "Token revocation failed (HTTP 500).",
+            "stage": "auth",
+            "retryable": True,
+        },
     }
 
 
@@ -991,10 +997,13 @@ def test_search_json_reports_refresh_failure_without_keyless_fallback(monkeypatc
 
     assert result.exit_code == 3
     assert json.loads(result.stdout) == {
+        "ok": False,
         "error": {
             "code": "oauth_refresh_failed",
             "message": "network down",
-        }
+            "stage": "auth",
+            "retryable": True,
+        },
     }
 
 
@@ -1010,8 +1019,13 @@ def test_api_key_login_json_reports_replacement_revocation_failure(monkeypatch: 
 
     assert result.exit_code == 3
     assert json.loads(result.stdout) == {
-        "authenticated": False,
-        "error": "old session revocation failed",
+        "ok": False,
+        "error": {
+            "code": "authentication_failed",
+            "message": "old session revocation failed",
+            "stage": "auth",
+            "retryable": False,
+        },
     }
 
 
@@ -1046,8 +1060,13 @@ def test_oauth_login_json_reports_replacement_revocation_failure(monkeypatch: py
 
     assert result.exit_code == 3
     assert json.loads(result.stdout) == {
-        "authenticated": False,
-        "error": "old session revocation failed",
+        "ok": False,
+        "error": {
+            "code": "authentication_failed",
+            "message": "old session revocation failed",
+            "stage": "auth",
+            "retryable": False,
+        },
     }
 
 

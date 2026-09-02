@@ -139,12 +139,14 @@ def _print_login_success(method: str, detail: str, *, json_mode: bool) -> None:
 
 def _print_login_failure(message: str, *, json_mode: bool) -> None:
     if json_mode:
-        import json as json_mod
+        from tavily_cli.common import emit_error
 
-        click.echo(json_mod.dumps({
-            "authenticated": False,
-            "error": message,
-        }))
+        emit_error(
+            "authentication_failed",
+            message,
+            stage="auth",
+            retryable=False,
+        )
         return
 
     from rich.markup import escape
@@ -212,8 +214,15 @@ def logout(ctx: click.Context, json_flag: bool) -> None:
         if json_mode:
             import json as json_mod
 
+            from tavily_cli.common import error_payload
+
             payload["server_revoked"] = False
-            payload["error"] = result.revocation_error
+            payload.update(error_payload(
+                "oauth_revocation_failed",
+                result.revocation_error,
+                stage="auth",
+                retryable=True,
+            ))
             click.echo(json_mod.dumps(payload))
         else:
             from rich.markup import escape

@@ -234,6 +234,53 @@ def emit(
         click.echo(text, nl=False)
 
 
+def emit_jsonl(
+    records: list[Any],
+    *,
+    output_file: str | None = None,
+    force: bool = True,
+    create_parents: bool = False,
+) -> None:
+    """Write one compact JSON value per line to stdout or an artifact."""
+    text = "".join(_json_text(record, pretty=False) for record in records)
+    if output_file:
+        _atomic_write_text(Path(output_file), text, force=force, create_parents=create_parents)
+    else:
+        click.echo(text, nl=False)
+
+
+def _emit_result_jsonl(
+    data: dict,
+    *,
+    command: str,
+    result_type: str,
+    output_file: str | None,
+    save: bool = False,
+    force: bool = True,
+) -> None:
+    """Emit list-shaped API output as typed records followed by metadata."""
+    results = data.get("results") or []
+    records = [{"type": result_type, "data": result} for result in results]
+    records.append({
+        "type": "summary",
+        "data": {
+            **{key: value for key, value in data.items() if key != "results"},
+            "result_count": len(results),
+        },
+    })
+
+    path = output_file
+    if save:
+        path = str(Path(".tavily") / command / f"{_artifact_timestamp()}.jsonl")
+    emit_jsonl(records, output_file=path, force=force, create_parents=save)
+    if path:
+        click.echo(json.dumps({
+            "ok": True,
+            "saved": True,
+            "artifacts": [path],
+        }, ensure_ascii=False))
+
+
 def _one_line(value: Any) -> str:
     return " ".join(sanitize_control(value).splitlines()).strip()
 
@@ -362,11 +409,22 @@ def print_search_results(
     data: dict,
     *,
     json_mode: bool,
+    jsonl_mode: bool = False,
     output_file: str | None = None,
     save: bool = False,
     force: bool = False,
 ) -> None:
     results = data.get("results") or []
+    if jsonl_mode:
+        _emit_result_jsonl(
+            data,
+            command="search",
+            result_type="result",
+            output_file=output_file,
+            save=save,
+            force=force,
+        )
+        return
     if _save_result(
         data,
         command="search",
@@ -444,12 +502,75 @@ def print_extract_results(
     data: dict,
     *,
     json_mode: bool,
+    jsonl_mode: bool = False,
     output_file: str | None = None,
     save: bool = False,
     force: bool = False,
+    failure: dict[str, Any] | None = None,
 ) -> None:
     results = data.get("results") or []
     failed = data.get("failed_results") or []
+    if jsonl_mode:
+        records = [
+            {"type": "result", "data": result}
+            for result in results
+        ]
+        records.extend(
+            {"type": "failed_result", "data": failed_result}
+            for failed_result in failed
+        )
+        metadata = {
+            key: value
+            for key, value in data.items()
+            if key not in {"results", "failed_results"}
+        }
+        records.append({
+            "type": "summary",
+            "data": {
+                **metadata,
+                "result_count": len(results),
+                "failed_count": len(failed),
+            },
+        })
+        if failure:
+            records.append(failure)
+
+        path = output_file
+        if save:
+            path = str(Path(".tavily") / "extract" / f"{_artifact_timestamp()}.jsonl")
+        if path:
+            emit_jsonl(records, output_file=path, force=force, create_parents=save)
+            payload = failure.copy() if failure else {"ok": True}
+            payload.update({
+                "saved": True,
+                "summary": f"Saved {len(results)} extraction{'s' if len(results) != 1 else ''} ({len(failed)} failed).",
+                "artifacts": [path],
+            })
+            click.echo(json.dumps(payload, ensure_ascii=False))
+        else:
+            emit_jsonl(records)
+        return
+
+    if failure and json_mode:
+        payload = failure.copy()
+        if output_file or save:
+            path = Path(output_file) if output_file else Path(".tavily") / "extract" / f"{_artifact_timestamp()}.json"
+            _atomic_write_text(
+                path,
+                _json_text(data, pretty=True),
+                force=force,
+                create_parents=save,
+            )
+            payload.update({
+                "saved": True,
+                "summary": f"Saved {len(results)} extraction{'s' if len(results) != 1 else ''} ({len(failed)} failed).",
+                "artifacts": [str(path)],
+            })
+        else:
+            payload["data"] = data
+        emit(payload, json_mode=True)
+        return
+
     if _save_result(
         data,
         command="extract",
@@ -508,9 +629,18 @@ def print_crawl_results(
     data: dict,
     *,
     json_mode: bool,
+    jsonl_mode: bool = False,
     output_file: str | None = None,
     output_dir: str | None = None,
 ) -> None:
+    if jsonl_mode:
+        _emit_result_jsonl(
+            data,
+            command="crawl",
+            result_type="page",
+            output_file=output_file,
+        )
+        return
     if output_dir:
         _save_crawl_to_dir(data, output_dir)
         return
@@ -587,11 +717,22 @@ def print_map_results(
     data: dict,
     *,
     json_mode: bool,
+    jsonl_mode: bool = False,
     output_file: str | None = None,
     save: bool = False,
     force: bool = False,
 ) -> None:
     results = data.get("results") or []
+    if jsonl_mode:
+        _emit_result_jsonl(
+            data,
+            command="map",
+            result_type="url",
+            output_file=output_file,
+            save=save,
+            force=force,
+        )
+        return
     if _save_result(
         data,
         command="map",
