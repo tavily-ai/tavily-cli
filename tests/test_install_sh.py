@@ -33,6 +33,22 @@ def _stub_environment(
     bin_dir.mkdir()
     log_file = tmp_path / "calls.log"
     _write_executable(
+        bin_dir / "python3",
+        """#!/bin/sh
+if [ "$1" = "--version" ]; then
+    printf 'Python 3.11.0\\n'
+elif [ "$1" = "-c" ]; then
+    case "$2" in
+        *version_info*) printf '3.11\\n' ;;
+        *sys.prefix*) printf '1\\n' ;;
+    esac
+elif [ "$1 $2 $3" = "-m pip show" ]; then
+    exit 1
+fi
+exit 0
+""",
+    )
+    _write_executable(
         bin_dir / "uv",
         """#!/bin/sh
 printf 'uv %s\\n' "$*" >> "$TVLY_INSTALL_TEST_LOG"
@@ -141,6 +157,8 @@ def test_noninteractive_install_prints_init_without_running_it(tmp_path: Path) -
         "uv tool install tavily-cli",
         "tvly --version",
     ]
+    assert "Success! tavily-cli 0.1.8 is installed." in result.stdout
+    assert "tavily-cli tavily-cli" not in result.stdout
     assert "tvly init" in result.stdout
 
 
@@ -256,18 +274,79 @@ exit 0
     assert "python3 -m pip install --upgrade tavily-cli" in log_file.read_text().splitlines()
 
 
-@pytest.mark.skipif(pty is None, reason="install.sh is a POSIX installer")
-def test_existing_pipx_install_upgrades_without_rerunning_init(tmp_path: Path) -> None:
+def test_pip_user_install_warns_with_user_base_bin(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log_file = tmp_path / "calls.log"
     _write_executable(
         bin_dir / "python3",
         """#!/bin/sh
+printf 'python3 %s\\n' "$*" >> "$TVLY_INSTALL_TEST_LOG"
 if [ "$1" = "--version" ]; then
     printf 'Python 3.11.0\\n'
 elif [ "$1" = "-c" ]; then
-    printf '3.11\\n'
+    case "$2" in
+        *version_info*) printf '3.11\\n' ;;
+        *sys.prefix*) printf '0\\n' ;;
+        *getuserbase*) printf '/home/test-user/.local/bin\\n' ;;
+    esac
+elif [ "$1 $2 $3" = "-m pip show" ]; then
+    exit 1
+fi
+exit 0
+""",
+    )
+    _write_executable(
+        bin_dir / "tvly",
+        """#!/bin/sh
+if [ "$1" = "--version" ]; then
+    printf 'tavily-cli 0.1.8\\n'
+fi
+exit 0
+""",
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "TVLY_INSTALL_TEST_LOG": str(log_file),
+    }
+
+    result = subprocess.run(
+        ["/bin/sh", str(INSTALL_SCRIPT)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "python3 -m pip install --user --upgrade tavily-cli" in log_file.read_text().splitlines()
+    assert "/home/test-user/.local/bin is not in your PATH" in result.stdout
+    assert "site-packages/bin" not in result.stdout
+
+
+@pytest.mark.skipif(pty is None, reason="install.sh is a POSIX installer")
+def test_existing_pipx_install_wins_over_available_uv(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_file = tmp_path / "calls.log"
+    old_python = """#!/bin/sh
+if [ "$1" = "-c" ]; then
+    printf '3.9\\n'
+fi
+exit 0
+"""
+    _write_executable(bin_dir / "python3", old_python)
+    _write_executable(bin_dir / "python", old_python)
+    _write_executable(
+        bin_dir / "uv",
+        """#!/bin/sh
+printf 'uv %s\\n' "$*" >> "$TVLY_INSTALL_TEST_LOG"
+if [ "$1 $2" = "tool list" ]; then
+    exit 0
+fi
+if [ "$1 $2" = "tool install" ]; then
+    exit 1
 fi
 exit 0
 """,
@@ -308,8 +387,73 @@ exit 0
 
     assert status == 0
     assert log_file.read_text().splitlines() == [
+        "uv tool list",
         "pipx list --short",
         "pipx upgrade tavily-cli",
         "tvly --version",
     ]
     assert "Starting guided Tavily setup" not in output
+
+
+def test_existing_pip_install_wins_over_available_uv(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_file = tmp_path / "calls.log"
+    _write_executable(
+        bin_dir / "uv",
+        """#!/bin/sh
+printf 'uv %s\\n' "$*" >> "$TVLY_INSTALL_TEST_LOG"
+if [ "$1 $2" = "tool list" ]; then
+    exit 0
+fi
+if [ "$1 $2" = "tool install" ]; then
+    exit 1
+fi
+exit 0
+""",
+    )
+    _write_executable(
+        bin_dir / "python3",
+        """#!/bin/sh
+printf 'python3 %s\\n' "$*" >> "$TVLY_INSTALL_TEST_LOG"
+if [ "$1" = "--version" ]; then
+    printf 'Python 3.11.0\\n'
+elif [ "$1" = "-c" ]; then
+    case "$2" in
+        *version_info*) printf '3.11\\n' ;;
+        *sys.prefix*) printf '1\\n' ;;
+    esac
+elif [ "$1 $2 $3" = "-m pip show" ]; then
+    exit 0
+fi
+exit 0
+""",
+    )
+    _write_executable(
+        bin_dir / "tvly",
+        """#!/bin/sh
+printf 'tvly %s\\n' "$*" >> "$TVLY_INSTALL_TEST_LOG"
+if [ "$1" = "--version" ]; then
+    printf 'tavily-cli 0.1.8\\n'
+fi
+exit 0
+""",
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "TVLY_INSTALL_TEST_LOG": str(log_file),
+    }
+
+    result = subprocess.run(
+        ["/bin/sh", str(INSTALL_SCRIPT)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    calls = log_file.read_text().splitlines()
+    assert "uv tool install tavily-cli" not in calls
+    assert "python3 -m pip install --upgrade tavily-cli" in calls

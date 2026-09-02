@@ -88,60 +88,96 @@ run_init_handoff() {
     warn "Guided setup did not complete. The CLI is installed; run 'tvly init' to try again."
 }
 
+require_python() {
+    if [ -z "${PYTHON:-}" ]; then
+        PYTHON=$(find_python) || error "Python ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}+ is required but not found.
+  Install it from https://www.python.org/downloads/ or install uv (https://docs.astral.sh/uv/) and try again."
+    fi
+}
+
+install_with_pip() {
+    require_python
+
+    py_version=$("$PYTHON" --version 2>&1)
+    info "Found $py_version"
+    info "Installing ${PACKAGE_NAME} with pip..."
+
+    if [ "$PIP_INSTALLED" != "1" ]; then
+        FRESH_INSTALL=1
+    fi
+
+    # Use --user only when outside a virtual environment
+    in_venv=$("$PYTHON" -c "import sys; print(int(sys.prefix != sys.base_prefix or hasattr(sys, 'real_prefix')))" 2>/dev/null) || in_venv=0
+    if [ "$in_venv" = "1" ]; then
+        "$PYTHON" -m pip install --upgrade "$PACKAGE_NAME"
+    else
+        "$PYTHON" -m pip install --user --upgrade "$PACKAGE_NAME"
+
+        # Warn if ~/.local/bin is not in PATH (common pip --user location)
+        user_bin=$("$PYTHON" -c "import site; print(site.getuserbase() + '/bin')" 2>/dev/null) || true
+        if [ -n "$user_bin" ] && ! echo "$PATH" | tr ':' '\n' | grep -qx "$user_bin"; then
+            warn "$user_bin is not in your PATH. Add it with:"
+            printf "  export PATH=\"%s:\$PATH\"\n\n" "$user_bin"
+        fi
+    fi
+}
+
 main() {
     printf "\n${BOLD}Tavily CLI Installer${RESET}\n\n"
 
-    # Install via uv (fastest) — no system Python required
+    # Preserve the package manager that already owns Tavily CLI. Only prefer uv
+    # for a fresh installation, after checking uv, pipx, and pip ownership.
+    UV_AVAILABLE=0
+    PIPX_AVAILABLE=0
+    UV_INSTALLED=0
+    PIPX_INSTALLED=0
+    PIP_INSTALLED=0
+    PYTHON=""
+
     if command -v uv >/dev/null 2>&1; then
-        info "Installing ${PACKAGE_NAME} with uv..."
+        UV_AVAILABLE=1
         if uv tool list 2>/dev/null | grep -q "^${PACKAGE_NAME} "; then
-            uv tool upgrade "$PACKAGE_NAME"
-        else
-            FRESH_INSTALL=1
-            uv tool install "$PACKAGE_NAME"
+            UV_INSTALLED=1
         fi
+    fi
+
+    if command -v pipx >/dev/null 2>&1; then
+        PIPX_AVAILABLE=1
+        if pipx list --short 2>/dev/null | grep -q "^${PACKAGE_NAME} "; then
+            PIPX_INSTALLED=1
+        fi
+    fi
+
+    PYTHON=$(find_python 2>/dev/null || true)
+    if [ -n "$PYTHON" ] && "$PYTHON" -m pip show "$PACKAGE_NAME" >/dev/null 2>&1; then
+        PIP_INSTALLED=1
+    fi
+
+    if [ "$UV_INSTALLED" = "1" ]; then
+        info "Installing ${PACKAGE_NAME} with uv..."
+        uv tool upgrade "$PACKAGE_NAME"
+    elif [ "$PIPX_INSTALLED" = "1" ]; then
+        info "Installing ${PACKAGE_NAME} with pipx..."
+        pipx upgrade "$PACKAGE_NAME"
+    elif [ "$PIP_INSTALLED" = "1" ]; then
+        install_with_pip
+    elif [ "$UV_AVAILABLE" = "1" ]; then
+        # uv is preferred for a fresh install and does not require system Python.
+        info "Installing ${PACKAGE_NAME} with uv..."
+        FRESH_INSTALL=1
+        uv tool install "$PACKAGE_NAME"
+    elif [ "$PIPX_AVAILABLE" = "1" ]; then
+        info "Installing ${PACKAGE_NAME} with pipx..."
+        FRESH_INSTALL=1
+        pipx install "$PACKAGE_NAME"
     else
-        # Find Python (needed for pipx / pip)
-        PYTHON=$(find_python) || error "Python ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}+ is required but not found.
-  Install it from https://www.python.org/downloads/ or install uv (https://docs.astral.sh/uv/) and try again."
-
-        py_version=$("$PYTHON" --version 2>&1)
-        info "Found $py_version"
-
-        if command -v pipx >/dev/null 2>&1; then
-            info "Installing ${PACKAGE_NAME} with pipx..."
-            if pipx list --short 2>/dev/null | grep -q "^${PACKAGE_NAME} "; then
-                pipx upgrade "$PACKAGE_NAME"
-            else
-                FRESH_INSTALL=1
-                pipx install "$PACKAGE_NAME"
-            fi
-        else
-            info "Installing ${PACKAGE_NAME} with pip..."
-            if ! "$PYTHON" -m pip show "$PACKAGE_NAME" >/dev/null 2>&1; then
-                FRESH_INSTALL=1
-            fi
-            # Use --user only when outside a virtual environment
-            in_venv=$("$PYTHON" -c "import sys; print(int(sys.prefix != sys.base_prefix or hasattr(sys, 'real_prefix')))" 2>/dev/null) || in_venv=0
-            if [ "$in_venv" = "1" ]; then
-                "$PYTHON" -m pip install --upgrade "$PACKAGE_NAME"
-            else
-                "$PYTHON" -m pip install --user --upgrade "$PACKAGE_NAME"
-
-                # Warn if ~/.local/bin is not in PATH (common pip --user location)
-                user_bin=$("$PYTHON" -c "import site; print(site.getusersitepackages().replace('/lib/python', '/bin').split('/lib/')[0] + '/bin')" 2>/dev/null) || true
-                if [ -n "$user_bin" ] && ! echo "$PATH" | tr ':' '\n' | grep -qx "$user_bin"; then
-                    warn "$user_bin is not in your PATH. Add it with:"
-                    printf "  export PATH=\"%s:\$PATH\"\n\n" "$user_bin"
-                fi
-            fi
-        fi
+        install_with_pip
     fi
 
     # Verify
     if command -v "$COMMAND_NAME" >/dev/null 2>&1; then
         installed_version=$("$COMMAND_NAME" --version 2>/dev/null || echo "unknown")
-        printf "\n${GREEN}${BOLD}Success!${RESET} ${PACKAGE_NAME} ${installed_version} is installed.\n"
+        printf "\n${GREEN}${BOLD}Success!${RESET} ${installed_version} is installed.\n"
     else
         printf "\n${GREEN}${BOLD}Installed!${RESET} You may need to restart your shell or add the install directory to your PATH.\n"
     fi
