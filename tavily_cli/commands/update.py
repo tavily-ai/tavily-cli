@@ -92,10 +92,14 @@ def update_command(check_only: bool, json_output: bool) -> None:
     try:
         current = _installed_version()
         if _is_newer(latest, current):
-            raise RuntimeError(
+            message = (
                 f"The package manager completed, but Tavily CLI is still {current}; latest is {latest}. "
                 "The installation may be pinned."
             )
+            manager_hint = _manager_hint(completed)
+            if manager_hint:
+                message = f"{message} Package manager reported: {manager_hint}"
+            raise RuntimeError(message)
     except Exception as exc:
         _fail("verify", str(exc), 1, json_output)
         return
@@ -315,13 +319,32 @@ def _unsupported_install_message(method: str) -> str:
     return "Could not determine how Tavily CLI was installed. Update it with the original package manager."
 
 
+def _manager_hint(completed: subprocess.CompletedProcess[str]) -> str | None:
+    """Return a bounded package-manager hint without echoing arbitrary command output."""
+    for output in (completed.stderr, completed.stdout):
+        for line in reversed(output.splitlines()):
+            candidate = sanitize_control(line).strip()
+            if candidate.lower().startswith("hint:"):
+                return candidate[:1000]
+    return None
+
+
+def _update_blocked_reason(install: InstallInfo) -> str | None:
+    if install.command is not None:
+        return None
+    return install.blocked_reason or _unsupported_install_message(install.method)
+
+
 def _result(*, current: str, latest: str, install: InstallInfo, updated: bool) -> dict[str, object]:
+    blocked_reason = _update_blocked_reason(install)
     return {
         "ok": True,
         "current_version": current,
         "latest_version": latest,
         "update_available": _is_newer(latest, current),
         "install_method": install.method,
+        "can_update": blocked_reason is None,
+        "blocked_reason": blocked_reason,
         "updated": updated,
     }
 
@@ -351,6 +374,9 @@ def _print_result(result: dict[str, object], *, json_output: bool, check_only: b
     elif result["update_available"]:
         click.echo(f"Tavily CLI update available: {current} -> {latest}")
         if check_only:
-            click.echo("Run `tvly update` to install it.")
+            if result["can_update"]:
+                click.echo("Run `tvly update` to install it.")
+            else:
+                click.echo(f"Self-update unavailable: {result['blocked_reason']}")
     else:
         click.echo(f"Tavily CLI {current} is up to date.")

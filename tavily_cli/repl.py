@@ -18,10 +18,6 @@ from tavily_cli.theme import LOGO
 
 err_console = Console(stderr=True)
 
-# Commands that the REPL recognises (mapped by the CLI group).
-_REPL_COMMANDS = {"search", "extract", "crawl", "map", "research", "login", "logout", "auth"}
-
-
 def _print_banner() -> None:
     """Print the branded welcome banner inside the REPL."""
     try:
@@ -40,12 +36,15 @@ def _print_banner() -> None:
     else:
         err_console.print("  [#FAA2FB]>[/#FAA2FB] Not authenticated")
         err_console.print("    [dim]search and extract work without a key (with a rate-limit cap).[/dim]")
-        err_console.print("    Type [#9BC0AE]login[/#9BC0AE] to authenticate and remove the cap.")
+        err_console.print("    Type [#9BC0AE]init[/#9BC0AE] for guided setup and skill installation.")
+        err_console.print("    Type [#9BC0AE]login[/#9BC0AE] for browser authentication only.")
 
     err_console.print()
 
     tips = Text()
     tips.append("  Tips: ", style="bold")
+    tips.append("init", style="#9BC0AE")
+    tips.append("  |  ", style="dim")
     tips.append("search ", style="#9BC0AE")
     tips.append('"query"', style="dim")
     tips.append("  |  ", style="dim")
@@ -54,6 +53,8 @@ def _print_banner() -> None:
     tips.append("  |  ", style="dim")
     tips.append("research ", style="#9BC0AE")
     tips.append('"topic"', style="dim")
+    tips.append("  |  ", style="dim")
+    tips.append("update", style="#9BC0AE")
     tips.append("  |  ", style="dim")
     tips.append("help", style="#9BC0AE")
     tips.append("  |  ", style="dim")
@@ -77,12 +78,16 @@ def _print_help() -> None:
     cmds.append("                      Discover URLs\n")
     cmds.append('    research "topic"', style="#9BC0AE")
     cmds.append("              Deep research\n")
+    cmds.append("    init", style="#9BC0AE")
+    cmds.append("                          Guided setup and skill installation\n")
     cmds.append("    login", style="#9BC0AE")
-    cmds.append("                         Authenticate\n")
+    cmds.append("                         Browser or API-key authentication\n")
     cmds.append("    logout", style="#9BC0AE")
     cmds.append("                        Clear credentials\n")
     cmds.append("    auth", style="#9BC0AE")
     cmds.append("                          Auth status\n")
+    cmds.append("    update", style="#9BC0AE")
+    cmds.append("                        Check for or install CLI updates\n")
     cmds.append("    exit / quit / Ctrl+C", style="#9BC0AE")
     cmds.append("          Leave\n")
     err_console.print(cmds)
