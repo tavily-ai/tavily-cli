@@ -23,7 +23,12 @@ from tavily_cli.commands.update import update_command
 def cli(ctx: click.Context, version: bool, show_status: bool, json_output: bool) -> None:
     """Tavily CLI — search, extract, crawl, map, and research from the command line.
 
-    Authenticate with: tvly login --api-key tvly-YOUR_KEY
+    First-time setup: tvly init
+
+    Browser authentication: tvly login
+
+    API-key authentication: tvly login --api-key tvly-YOUR_KEY
+
     Or set TAVILY_API_KEY environment variable.
     """
     ctx.ensure_object(dict)

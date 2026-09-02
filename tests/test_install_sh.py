@@ -53,7 +53,7 @@ exit 0
         """#!/bin/sh
 printf 'tvly %s\\n' "$*" >> "$TVLY_INSTALL_TEST_LOG"
 if [ "$1" = "--version" ]; then
-    printf 'tavily-cli 0.1.7\\n'
+    printf 'tavily-cli 0.1.8\\n'
     exit 0
 fi
 if [ "$1 $2" = "init --help" ]; then
@@ -235,7 +235,7 @@ exit 0
         """#!/bin/sh
 printf 'tvly %s\\n' "$*" >> "$TVLY_INSTALL_TEST_LOG"
 if [ "$1" = "--version" ]; then
-    printf 'tavily-cli 0.1.7\\n'
+    printf 'tavily-cli 0.1.8\\n'
 fi
 exit 0
 """,
@@ -291,7 +291,7 @@ exit 0
         """#!/bin/sh
 printf 'tvly %s\\n' "$*" >> "$TVLY_INSTALL_TEST_LOG"
 if [ "$1" = "--version" ]; then
-    printf 'tavily-cli 0.1.7\\n'
+    printf 'tavily-cli 0.1.8\\n'
 fi
 exit 0
 """,

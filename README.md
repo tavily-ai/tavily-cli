@@ -274,7 +274,8 @@ tvly update --check --json
 ```
 
 `--check` is read-only. Source/direct-URL installations are reported without
-being modified.
+being modified. JSON output includes `can_update` and `blocked_reason` so
+automation can distinguish an available release from a supported self-update.
 
 ### `tvly extract`
 

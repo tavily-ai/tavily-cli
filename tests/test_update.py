@@ -378,6 +378,8 @@ def test_update_check_json_is_read_only(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert result.exit_code == 0
     assert json.loads(result.stdout) == {
+        "blocked_reason": None,
+        "can_update": True,
         "current_version": "1.0.0",
         "install_method": "uv",
         "latest_version": "1.1.0",
@@ -399,7 +401,43 @@ def test_update_check_does_not_require_manager_binary_directory(monkeypatch: pyt
     result = CliRunner().invoke(cli, ["update", "--check", "--json"])
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["update_available"] is True
+    output = json.loads(result.stdout)
+    assert output["update_available"] is True
+    assert output["can_update"] is False
+    assert output["blocked_reason"] == "Could not safely determine PIPX_BIN_DIR."
+
+
+def test_update_check_reports_source_install_as_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(update_module, "__version__", "1.0.0")
+    monkeypatch.setattr(update_module, "fetch_latest_version", lambda: "1.1.0")
+    monkeypatch.setattr(update_module, "detect_install", lambda: InstallInfo("source", None))
+
+    result = CliRunner().invoke(cli, ["update", "--check", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "blocked_reason": "This is a source or direct-URL installation. Update it from its original source.",
+        "can_update": False,
+        "current_version": "1.0.0",
+        "install_method": "source",
+        "latest_version": "1.1.0",
+        "ok": True,
+        "update_available": True,
+        "updated": False,
+    }
+
+
+def test_update_check_human_does_not_recommend_blocked_self_update(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(update_module, "__version__", "1.0.0")
+    monkeypatch.setattr(update_module, "fetch_latest_version", lambda: "1.1.0")
+    monkeypatch.setattr(update_module, "detect_install", lambda: InstallInfo("uvx", None))
+
+    result = CliRunner().invoke(cli, ["update", "--check"])
+
+    assert result.exit_code == 0
+    assert "Self-update unavailable:" in result.stdout
+    assert "rerun uvx" in result.stdout
+    assert "Run `tvly update`" not in result.stdout
 
 
 def test_update_check_failure_is_structured(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -484,6 +522,8 @@ def test_update_runs_detected_manager_and_verifies_version(monkeypatch: pytest.M
     assert environments[0]["PIPX_BIN_DIR"] == "/custom/bin"
     assert environments[0]["PATH"] == os.environ["PATH"]
     assert json.loads(result.stdout) == {
+        "blocked_reason": None,
+        "can_update": True,
         "current_version": "1.1.0",
         "install_method": "pipx",
         "latest_version": "1.1.0",
@@ -573,3 +613,55 @@ def test_update_verifies_package_manager_changed_version(monkeypatch: pytest.Mon
     output = json.loads(result.stdout)
     assert output["error"]["stage"] == "verify"
     assert "may be pinned" in output["error"]["message"]
+
+
+def test_update_surfaces_manager_hint_when_successful_upgrade_is_pinned(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(update_module, "__version__", "1.0.0")
+    monkeypatch.setattr(update_module, "fetch_latest_version", lambda: "1.1.0")
+    monkeypatch.setattr(
+        update_module,
+        "detect_install",
+        lambda: InstallInfo("uv", ("uv", "tool", "upgrade", "tavily-cli")),
+    )
+    monkeypatch.setattr(update_module, "_installed_version", lambda: "1.0.0")
+    monkeypatch.setattr(
+        update_module.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            0,
+            stdout="Nothing to upgrade\nhint: reinstall with 'uv tool install tavily-cli@latest'\n",
+            stderr="",
+        ),
+    )
+
+    result = CliRunner().invoke(cli, ["update", "--json"])
+
+    assert result.exit_code == 1
+    output = json.loads(result.stdout)
+    assert output["error"]["stage"] == "verify"
+    assert "Package manager reported: hint: reinstall with 'uv tool install tavily-cli@latest'" in output["error"][
+        "message"
+    ]
+
+
+def test_update_does_not_echo_non_hint_output_after_successful_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(update_module, "__version__", "1.0.0")
+    monkeypatch.setattr(update_module, "fetch_latest_version", lambda: "1.1.0")
+    monkeypatch.setattr(update_module, "detect_install", lambda: InstallInfo("uv", ("uv", "tool", "upgrade")))
+    monkeypatch.setattr(update_module, "_installed_version", lambda: "1.0.0")
+    monkeypatch.setattr(
+        update_module.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            0,
+            stdout="Index URL: https://user:secret@example.com/simple\nNothing to upgrade\n",
+            stderr="",
+        ),
+    )
+
+    result = CliRunner().invoke(cli, ["update", "--json"])
+
+    assert result.exit_code == 1
+    assert "secret" not in result.stdout
