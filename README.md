@@ -20,6 +20,19 @@ CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, ex
 
 Requires **Python 3.10+**.
 
+### Guided installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tavily-ai/tavily-cli/main/install.sh | sh
+```
+
+On a fresh interactive desktop installation, the installer starts `tvly init`
+to guide authentication, agent detection, skill installation, and verification.
+In CI, SSH/headless, and other non-interactive environments, run `tvly init`
+separately after installation.
+
+### Package manager
+
 ```bash
 pip install tavily-cli
 ```
