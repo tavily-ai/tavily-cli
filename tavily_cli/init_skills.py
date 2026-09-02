@@ -14,8 +14,10 @@ from uuid import uuid4
 
 import httpx
 
-SKILLS_SOURCE = "tavily-ai/skills"
-SKILLS_ARCHIVE_URL = "https://codeload.github.com/tavily-ai/skills/tar.gz/refs/heads/main"
+SKILLS_COMMIT = "ea5e8201b0d3ed9c10b70b71187589bd761fe2d2"
+SKILLS_ARCHIVE_SHA256 = "a6d304afa7f4274dd307fb02917fd04d23771610fb828f2a7463d5745eccf804"
+SKILLS_SOURCE = f"tavily-ai/skills@{SKILLS_COMMIT}"
+SKILLS_ARCHIVE_URL = f"https://codeload.github.com/tavily-ai/skills/tar.gz/{SKILLS_COMMIT}"
 CORE_SKILLS = (
     "tavily-best-practices",
     "tavily-cli",
@@ -86,7 +88,10 @@ def download_skills_archive(*, client: httpx.Client | None = None) -> bytes:
                 if size > _MAX_ARCHIVE_BYTES:
                     raise ValueError("Tavily skills archive exceeds the 25 MB safety limit.")
                 chunks.append(chunk)
-        return b"".join(chunks)
+        archive = b"".join(chunks)
+        if hashlib.sha256(archive).hexdigest() != SKILLS_ARCHIVE_SHA256:
+            raise ValueError("Downloaded Tavily skills archive failed integrity verification.")
+        return archive
     finally:
         if close:
             http.close()
@@ -211,7 +216,9 @@ def _extract_core_skills(archive_data: bytes, destination: Path) -> None:
                 raise ValueError(f"Could not read {member.name} from the Tavily skills archive.")
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(source.read())
-            target.chmod(0o755 if member.mode & 0o111 else 0o644)
+            # Skill payloads are data consumed by agents, not trusted programs.
+            # Never propagate executable bits supplied by the archive.
+            target.chmod(0o644)
             found.add(skill_name)
 
     missing = [name for name in CORE_SKILLS if name not in found or not (destination / name / "SKILL.md").is_file()]

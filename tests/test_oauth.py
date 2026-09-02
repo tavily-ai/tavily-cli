@@ -5,6 +5,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -168,6 +172,7 @@ def test_fetch_metadata_uses_discovery() -> None:
         url = str(request.url)
         if url.endswith("oauth-authorization-server"):
             return httpx.Response(200, json={
+                "issuer": "https://mcp.tavily.com/",
                 "authorization_endpoint": "https://mcp.tavily.com/authorize",
                 "token_endpoint": "https://mcp.tavily.com/token",
                 "registration_endpoint": "https://mcp.tavily.com/register",
@@ -181,6 +186,55 @@ def test_fetch_metadata_uses_discovery() -> None:
     meta = fetch_metadata(http)
     assert meta.authorization_endpoint == "https://mcp.tavily.com/authorize"
     assert meta.resource == "https://mcp.tavily.com/mcp"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_error"),
+    [
+        ("issuer", "https://attacker.example/", "issuer does not match"),
+        ("token_endpoint", "http://mcp.tavily.com/token", "invalid token_endpoint"),
+        ("registration_endpoint", "https://user:pass@mcp.tavily.com/register", "invalid registration_endpoint"),
+    ],
+)
+def test_fetch_metadata_rejects_untrusted_authorization_metadata(
+    field: str,
+    value: str,
+    expected_error: str,
+) -> None:
+    metadata = {
+        "issuer": "https://mcp.tavily.com/",
+        "authorization_endpoint": "https://mcp.tavily.com/authorize",
+        "token_endpoint": "https://mcp.tavily.com/token",
+        "registration_endpoint": "https://mcp.tavily.com/register",
+        "revocation_endpoint": "https://mcp.tavily.com/revoke",
+    }
+    metadata[field] = value
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url).endswith("oauth-authorization-server"):
+            return httpx.Response(200, json=metadata)
+        return httpx.Response(200, json={"resource": "https://mcp.tavily.com/mcp"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http, pytest.raises(OAuthError, match=expected_error):
+        fetch_metadata(http)
+
+
+def test_fetch_metadata_rejects_different_protected_resource() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url).endswith("oauth-authorization-server"):
+            return httpx.Response(200, json={
+                "issuer": "https://mcp.tavily.com/",
+                "authorization_endpoint": "https://mcp.tavily.com/authorize",
+                "token_endpoint": "https://mcp.tavily.com/token",
+                "registration_endpoint": "https://mcp.tavily.com/register",
+            })
+        return httpx.Response(200, json={"resource": "https://attacker.example/mcp"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http, pytest.raises(
+        OAuthError,
+        match="does not match the Tavily MCP resource",
+    ):
+        fetch_metadata(http)
 
 
 def test_refresh_tokens_keeps_refresh_if_omitted() -> None:
@@ -771,6 +825,177 @@ def test_malformed_expiry_without_refresh_is_invalid() -> None:
     })
 
     assert access_token is None
+
+
+def test_config_write_keeps_previous_file_when_atomic_replace_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tavily_cli import config
+
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
+    config._write_config({"api_key": "tvly-old"})
+
+    monkeypatch.setattr(config.os, "replace", lambda source, target: (_ for _ in ()).throw(OSError("disk busy")))
+
+    with pytest.raises(OSError, match="disk busy"):
+        config._write_config({"api_key": "tvly-new"})
+
+    assert config._read_config() == {"api_key": "tvly-old"}
+    assert not list(tmp_path.glob(".config.json.*.tmp"))
+
+
+def test_parallel_expired_session_refreshes_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tavily_cli import config, oauth
+    from tavily_cli.oauth import OAuthTokens
+
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
+    config._write_config({
+        "oauth": {
+            "access_token": "old-access",
+            "refresh_token": "old-refresh",
+            "expires_at": 0,
+            "client_id": "same-client",
+            "client_secret": None,
+            "token_endpoint_auth_method": "none",
+            "redirect_uri": "http://127.0.0.1:1/callback",
+        }
+    })
+
+    refresh_started = threading.Event()
+    release_refresh = threading.Event()
+    second_started = threading.Event()
+    refresh_calls: list[str] = []
+    results: list[str | None] = []
+    errors: list[Exception] = []
+
+    monkeypatch.setattr(oauth, "fetch_metadata", lambda: object())
+
+    def refresh_once(metadata: object, client: RegisteredClient, refresh_token: str) -> OAuthTokens:
+        refresh_calls.append(refresh_token)
+        refresh_started.set()
+        assert release_refresh.wait(timeout=2)
+        return OAuthTokens(
+            access_token="new-access",
+            refresh_token="new-refresh",
+            expires_at=expires_at_from_now(3600),
+        )
+
+    monkeypatch.setattr(oauth, "refresh_tokens", refresh_once)
+
+    def resolve(*, second: bool = False) -> None:
+        if second:
+            second_started.set()
+        try:
+            results.append(config.get_api_key())
+        except Exception as e:
+            errors.append(e)
+
+    first = threading.Thread(target=resolve)
+    first.start()
+    assert refresh_started.wait(timeout=2)
+    second = threading.Thread(target=resolve, kwargs={"second": True})
+    second.start()
+    assert second_started.wait(timeout=2)
+    release_refresh.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert results == ["new-access", "new-access"]
+    assert refresh_calls == ["old-refresh"]
+    assert config._read_config()["oauth"]["refresh_token"] == "new-refresh"
+
+
+def test_config_lock_serializes_separate_processes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tavily_cli import config
+
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
+    config._write_config({"api_key": "tvly-old"})
+    started = tmp_path / "child-started"
+    child_code = "\n".join((
+        "import sys",
+        "from pathlib import Path",
+        "from tavily_cli import config",
+        "root = Path(sys.argv[1])",
+        "config.CONFIG_DIR = root",
+        "config.CONFIG_FILE = root / 'config.json'",
+        "(root / 'child-started').touch()",
+        "config._write_config({'api_key': 'tvly-new'})",
+    ))
+
+    with config._config_lock():
+        child = subprocess.Popen(
+            [sys.executable, "-c", child_code, str(tmp_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        deadline = time.monotonic() + 5
+        while not started.exists() and child.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert started.exists()
+        time.sleep(0.1)
+        assert child.poll() is None
+        assert config._read_config() == {"api_key": "tvly-old"}
+
+    stdout, stderr = child.communicate(timeout=5)
+    assert child.returncode == 0, stdout + stderr
+    assert config._read_config() == {"api_key": "tvly-new"}
+
+
+def test_refresh_failure_is_reported_and_preserves_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tavily_cli import config, oauth
+
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
+    previous = {
+        "access_token": "old-access",
+        "refresh_token": "old-refresh",
+        "expires_at": 0,
+        "client_id": "same-client",
+        "client_secret": None,
+        "token_endpoint_auth_method": "none",
+        "redirect_uri": "http://127.0.0.1:1/callback",
+    }
+    config._write_config({"oauth": previous})
+    monkeypatch.setattr(oauth, "fetch_metadata", lambda: (_ for _ in ()).throw(OAuthError("network down")))
+
+    with pytest.raises(OAuthError, match="Could not refresh.*network down"):
+        config.get_api_key()
+
+    assert config._read_config() == {"oauth": previous}
+
+
+def test_search_json_reports_refresh_failure_without_keyless_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tavily_cli import config
+    from tavily_cli.cli import cli
+
+    monkeypatch.setattr(config, "get_api_key", lambda: (_ for _ in ()).throw(OAuthError("network down")))
+
+    result = CliRunner().invoke(cli, ["search", "query", "--json"])
+
+    assert result.exit_code == 3
+    assert json.loads(result.stdout) == {
+        "error": {
+            "code": "oauth_refresh_failed",
+            "message": "network down",
+        }
+    }
 
 
 def test_api_key_login_json_reports_replacement_revocation_failure(monkeypatch: pytest.MonkeyPatch) -> None:

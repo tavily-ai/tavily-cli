@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import functools
+import json
 import re
 
 import click
-
 from tavily import TavilyKeylessLimitError
 
 from tavily_cli.keyless import format_keyless_envelope_for_terminal
-
 
 # C0/C1 control and escape bytes, minus tab (\x09), newline (\x0a), and
 # carriage return (\x0d). Stripping these from server- and web-derived text
@@ -76,6 +74,26 @@ def handle_keyless_cap_hit(e: TavilyKeylessLimitError, json_mode: bool) -> None:
         "and remove this cap.[/dim]"
     )
     err_console.print()
+    raise SystemExit(3)
+
+
+def handle_oauth_refresh_error(e: Exception, json_mode: bool) -> None:
+    """Render a stored OAuth refresh failure without treating it as logout."""
+    message = sanitize_control(e)
+    if json_mode:
+        click.echo(json.dumps({
+            "error": {
+                "code": "oauth_refresh_failed",
+                "message": message,
+            }
+        }))
+        raise SystemExit(3)
+
+    from rich.markup import escape
+
+    from tavily_cli.theme import err_console
+
+    err_console.print(f"  [#FAA2FB]> OAuth refresh failed:[/#FAA2FB] {escape(message)}")
     raise SystemExit(3)
 
 

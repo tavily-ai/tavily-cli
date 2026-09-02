@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import readline  # noqa: F401 — enables arrow-key history in input()
 import shlex
-import sys
 
 import click
 from rich.console import Console
@@ -13,9 +11,10 @@ from rich.rule import Rule
 from rich.text import Text
 
 from tavily_cli import __version__
+from tavily_cli.common import handle_oauth_refresh_error
 from tavily_cli.config import get_api_key
+from tavily_cli.oauth import OAuthError
 from tavily_cli.theme import LOGO
-
 
 err_console = Console(stderr=True)
 
@@ -25,7 +24,10 @@ _REPL_COMMANDS = {"search", "extract", "crawl", "map", "research", "login", "log
 
 def _print_banner() -> None:
     """Print the branded welcome banner inside the REPL."""
-    key = get_api_key()
+    try:
+        key = get_api_key()
+    except OAuthError as e:
+        handle_oauth_refresh_error(e, False)
 
     err_console.print(LOGO)
     err_console.print(f"  [dim]v{__version__}[/dim]")
@@ -36,9 +38,9 @@ def _print_banner() -> None:
         source = _auth_source(key)
         err_console.print(f"  [#9BC0AE]>[/#9BC0AE] Authenticated via {source}")
     else:
-        err_console.print(f"  [#FAA2FB]>[/#FAA2FB] Not authenticated")
-        err_console.print(f"    [dim]search and extract work without a key (with a rate-limit cap).[/dim]")
-        err_console.print(f"    Type [#9BC0AE]login[/#9BC0AE] to authenticate and remove the cap.")
+        err_console.print("  [#FAA2FB]>[/#FAA2FB] Not authenticated")
+        err_console.print("    [dim]search and extract work without a key (with a rate-limit cap).[/dim]")
+        err_console.print("    Type [#9BC0AE]login[/#9BC0AE] to authenticate and remove the cap.")
 
     err_console.print()
 

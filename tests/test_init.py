@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import tarfile
 from pathlib import Path
 
+import httpx
 import pytest
 from click.testing import CliRunner
 
+from tavily_cli import init_skills as init_skills_module
 from tavily_cli.cli import cli
 from tavily_cli.commands import init as init_module
 from tavily_cli.init_skills import (
     CORE_SKILLS,
     SkillsInstallResult,
     detect_agents,
+    download_skills_archive,
     install_skills,
     verify_skills,
 )
@@ -48,6 +52,27 @@ def _add_file(archive: tarfile.TarFile, name: str, content: bytes, *, mode: int 
     member.size = len(content)
     member.mode = mode
     archive.addfile(member, io.BytesIO(content))
+
+
+def test_download_skills_archive_verifies_checksum(monkeypatch: pytest.MonkeyPatch) -> None:
+    archive = _skills_archive()
+    monkeypatch.setattr(
+        init_skills_module,
+        "SKILLS_ARCHIVE_SHA256",
+        hashlib.sha256(archive).hexdigest(),
+    )
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=archive, request=request))
+
+    with httpx.Client(transport=transport) as client:
+        assert download_skills_archive(client=client) == archive
+
+
+def test_download_skills_archive_rejects_checksum_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(init_skills_module, "SKILLS_ARCHIVE_SHA256", "0" * 64)
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b"tampered", request=request))
+
+    with httpx.Client(transport=transport) as client, pytest.raises(ValueError, match="integrity verification"):
+        download_skills_archive(client=client)
 
 
 def test_detect_agents_only_returns_existing_markers(tmp_path: Path) -> None:
@@ -94,7 +119,7 @@ def test_skill_install_is_complete_and_idempotent(tmp_path: Path) -> None:
     assert verify_skills(("codex",), home=tmp_path)
     script = tmp_path / ".agents" / "skills" / "tavily-cli" / "scripts" / "check.sh"
     assert script.read_text() == "#!/bin/sh\nexit 99\n"
-    assert script.stat().st_mode & 0o111
+    assert script.stat().st_mode & 0o111 == 0
 
     second = install_skills(("codex",), home=tmp_path, archive=archive)
 
@@ -179,6 +204,9 @@ def test_init_noninteractive_auth_failure_is_json(monkeypatch: pytest.MonkeyPatc
 
 
 def test_init_live_search_failure_exits_four(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tavily_cli import config
+
+    monkeypatch.setattr(config, "get_api_key", lambda: None)
     monkeypatch.setattr(init_module, "_verify_cli", lambda: True)
     monkeypatch.setattr(init_module, "_verify_live_search", lambda: False)
 

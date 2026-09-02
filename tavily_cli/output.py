@@ -11,21 +11,18 @@ and rendered via ``Text``/validated links rather than markup-bearing f-strings.
 from __future__ import annotations
 
 import json
-import sys
 from typing import Any
 from urllib.parse import urlparse
 
 import click
 from rich.console import Console
 from rich.markdown import Markdown
-from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
 from tavily_cli.common import sanitize_control
-
 
 console = Console()
 err_console = Console(stderr=True)
@@ -130,7 +127,7 @@ def print_search_results(data: dict, *, json_mode: bool, output_file: str | None
 
     if answer:
         console.print()
-        console.print(f"  [#5CD9E6 bold]Answer[/#5CD9E6 bold]")
+        console.print("  [#5CD9E6 bold]Answer[/#5CD9E6 bold]")
         console.print()
         console.print(Markdown(sanitize_control(answer)), width=min(console.width, 100))
         console.print()
@@ -350,7 +347,7 @@ def print_research_result(data: dict, *, json_mode: bool, output_file: str | Non
     # Render the research report as markdown
     if content:
         console.print()
-        console.print(f"  [#5CD9E6 bold]Research Report[/#5CD9E6 bold]")
+        console.print("  [#5CD9E6 bold]Research Report[/#5CD9E6 bold]")
         console.print()
         console.print(Markdown(sanitize_control(content)), width=min(console.width, 100))
 

@@ -104,6 +104,19 @@ def token_is_expired(expires_at: object, *, now: float | None = None) -> bool:
     return (now if now is not None else time.time()) >= expires_at
 
 
+def _validated_https_url(value: str, *, field: str) -> str:
+    parsed = urllib.parse.urlparse(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        raise OAuthError(f"OAuth discovery returned an invalid {field}; expected a secure HTTPS URL.")
+    return value
+
+
 def fetch_metadata(client: httpx.Client | None = None) -> OAuthMetadata:
     """Discover AS + resource metadata, with static fallbacks if discovery fails."""
     http = client or httpx.Client(timeout=HTTP_TIMEOUT)
@@ -115,7 +128,17 @@ def fetch_metadata(client: httpx.Client | None = None) -> OAuthMetadata:
             resp.raise_for_status()
             discovered = resp.json()
             if isinstance(discovered, dict):
-                data.update({k: v for k, v in discovered.items() if isinstance(v, str)})
+                if discovered.get("issuer") != MCP_ISSUER:
+                    raise OAuthError("OAuth discovery issuer does not match the configured Tavily issuer.")
+                for field in (
+                    "authorization_endpoint",
+                    "token_endpoint",
+                    "registration_endpoint",
+                    "revocation_endpoint",
+                ):
+                    value = discovered.get(field)
+                    if isinstance(value, str):
+                        data[field] = _validated_https_url(value, field=field)
         except (httpx.HTTPError, json.JSONDecodeError, ValueError):
             pass
 
@@ -125,7 +148,10 @@ def fetch_metadata(client: httpx.Client | None = None) -> OAuthMetadata:
             if resp.is_success:
                 prm = resp.json()
                 if isinstance(prm, dict) and isinstance(prm.get("resource"), str):
-                    resource = prm["resource"]
+                    discovered_resource = _validated_https_url(prm["resource"], field="resource")
+                    if discovered_resource != MCP_RESOURCE:
+                        raise OAuthError("OAuth protected-resource metadata does not match the Tavily MCP resource.")
+                    resource = discovered_resource
         except (httpx.HTTPError, json.JSONDecodeError, ValueError):
             pass
 
@@ -134,11 +160,17 @@ def fetch_metadata(client: httpx.Client | None = None) -> OAuthMetadata:
         token = data.get("token_endpoint")
         if not registration or not authorization or not token:
             raise OAuthError("OAuth discovery did not return authorization, token, and registration endpoints.")
+        registration = _validated_https_url(registration, field="registration_endpoint")
+        authorization = _validated_https_url(authorization, field="authorization_endpoint")
+        token = _validated_https_url(token, field="token_endpoint")
+        revocation = data.get("revocation_endpoint")
+        if revocation is not None:
+            revocation = _validated_https_url(revocation, field="revocation_endpoint")
         return OAuthMetadata(
             authorization_endpoint=authorization,
             token_endpoint=token,
             registration_endpoint=registration,
-            revocation_endpoint=data.get("revocation_endpoint"),
+            revocation_endpoint=revocation,
             resource=resource,
         )
     finally:

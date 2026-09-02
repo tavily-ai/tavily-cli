@@ -53,11 +53,16 @@ def _print_welcome() -> None:
     from rich.console import Console
     from rich.text import Text
 
+    from tavily_cli.common import handle_oauth_refresh_error
     from tavily_cli.config import get_api_key
+    from tavily_cli.oauth import OAuthError
     from tavily_cli.theme import LOGO
 
     console = Console(stderr=True)
-    key = get_api_key()
+    try:
+        key = get_api_key()
+    except OAuthError as e:
+        handle_oauth_refresh_error(e, False)
 
     # Logo + version
     console.print()
@@ -70,9 +75,9 @@ def _print_welcome() -> None:
         source = _auth_source(key)
         console.print(f"  [#9BC0AE]>[/#9BC0AE] Authenticated via {source}")
     else:
-        console.print(f"  [#FAA2FB]>[/#FAA2FB] Not authenticated")
-        console.print(f"    [dim]search and extract work without a key (with a rate-limit cap).[/dim]")
-        console.print(f"    [dim]Run:[/dim] tvly login [dim]to remove the cap.[/dim]")
+        console.print("  [#FAA2FB]>[/#FAA2FB] Not authenticated")
+        console.print("    [dim]search and extract work without a key (with a rate-limit cap).[/dim]")
+        console.print("    [dim]Run:[/dim] tvly login [dim]to remove the cap.[/dim]")
 
     console.print()
 
@@ -104,6 +109,7 @@ def _print_welcome() -> None:
 def _auth_source(key: str) -> str:
     """Describe how the user is authenticated."""
     import os
+
     from tavily_cli.config import is_oauth_token
 
     if os.environ.get("TAVILY_API_KEY"):
@@ -117,9 +123,14 @@ def _print_status(json_output: bool) -> None:
     """Show version + auth status."""
     import json
 
+    from tavily_cli.common import handle_oauth_refresh_error
     from tavily_cli.config import get_api_key
+    from tavily_cli.oauth import OAuthError
 
-    key = get_api_key()
+    try:
+        key = get_api_key()
+    except OAuthError as e:
+        handle_oauth_refresh_error(e, json_output)
     authenticated = key is not None
 
     if json_output:

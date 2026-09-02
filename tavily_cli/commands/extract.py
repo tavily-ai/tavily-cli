@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import click
-
 from tavily import TavilyKeylessLimitError
 
-from tavily_cli.common import client_name_option, handle_api_error, handle_keyless_cap_hit, json_option
+from tavily_cli.common import (
+    client_name_option,
+    handle_api_error,
+    handle_keyless_cap_hit,
+    handle_oauth_refresh_error,
+    json_option,
+)
 
 
 @click.command()
@@ -42,8 +47,6 @@ def extract(
     from tavily_cli.config import get_client_or_keyless
     from tavily_cli.output import print_extract_results
 
-    client, _is_keyless = get_client_or_keyless(client_name=client_name)
-
     url_list = list(urls)
     if len(url_list) > 20:
         raise click.UsageError("Maximum 20 URLs per request.")
@@ -62,13 +65,17 @@ def extract(
     if timeout is not None:
         kwargs["timeout"] = timeout
 
+    from tavily_cli.oauth import OAuthError
     from tavily_cli.theme import spinner
 
     try:
+        client, _is_keyless = get_client_or_keyless(client_name=client_name)
         with spinner(f"Extracting {len(url_list)} URL{'s' if len(url_list) > 1 else ''}...", json_mode=json_output):
             response = client.extract(**kwargs)
     except TavilyKeylessLimitError as e:
         handle_keyless_cap_hit(e, json_output)
+    except OAuthError as e:
+        handle_oauth_refresh_error(e, json_output)
     except Exception as e:
         handle_api_error(e, json_output)
 

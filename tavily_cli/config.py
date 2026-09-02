@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 from uuid import uuid4
 
 import psutil
@@ -15,6 +20,9 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 _SESSION_FILE = CONFIG_DIR / "session.json"
 
 MCP_AUTH_DIR = Path.home() / ".mcp-auth"
+
+_CONFIG_THREAD_LOCK = threading.RLock()
+_CONFIG_LOCK_STATE = threading.local()
 
 
 @dataclass(frozen=True)
@@ -98,15 +106,90 @@ def _read_config() -> dict:
     return {}
 
 
-def _write_config(data: dict) -> None:
-    old_umask = os.umask(0o077)  # ensure new files are owner-only from creation, sets the new umask to 0o077 and returns whatever the previous umask was.
-    try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+def _lock_file(lock_file: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        lock_file.seek(0, os.SEEK_END)
+        if lock_file.tell() == 0:
+            lock_file.write(b"\0")
+            lock_file.flush()
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_file(lock_file: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        lock_file.seek(0)
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _config_lock() -> Iterator[None]:
+    """Serialize config transactions across threads and CLI processes."""
+    with _CONFIG_THREAD_LOCK:
+        depth = getattr(_CONFIG_LOCK_STATE, "depth", 0)
+        if depth:
+            _CONFIG_LOCK_STATE.depth = depth + 1
+            try:
+                yield
+            finally:
+                _CONFIG_LOCK_STATE.depth -= 1
+            return
+
+        CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
         CONFIG_DIR.chmod(0o700)
-        CONFIG_FILE.write_text(json.dumps(data, indent=2) + "\n")
+        lock_path = CONFIG_FILE.with_name(f".{CONFIG_FILE.name}.lock")
+        lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        with os.fdopen(lock_fd, "r+b", buffering=0) as lock_file:
+            lock_path.chmod(0o600)
+            _lock_file(lock_file)
+            _CONFIG_LOCK_STATE.depth = 1
+            try:
+                yield
+            finally:
+                _CONFIG_LOCK_STATE.depth = 0
+                _unlock_file(lock_file)
+
+
+def _write_config_unlocked(data: dict) -> None:
+    """Atomically replace config.json while the caller holds _config_lock."""
+    CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    CONFIG_DIR.chmod(0o700)
+    payload = json.dumps(data, indent=2) + "\n"
+    descriptor, temp_name = tempfile.mkstemp(
+        dir=CONFIG_DIR,
+        prefix=f".{CONFIG_FILE.name}.",
+        suffix=".tmp",
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as temp_file:
+            temp_file.write(payload)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        temp_path.chmod(0o600)
+        os.replace(temp_path, CONFIG_FILE)
         CONFIG_FILE.chmod(0o600)
     finally:
-        os.umask(old_umask)
+        temp_path.unlink(missing_ok=True)
+
+
+def _write_config(data: dict) -> None:
+    with _config_lock():
+        _write_config_unlocked(data)
 
 
 def _oauth_session_data(session) -> dict:
@@ -129,13 +212,14 @@ def _oauth_session_data(session) -> dict:
 
 def save_api_key(api_key: str) -> None:
     """Replace stored credentials with an API key, revoking old OAuth first."""
-    config = _read_config()
-    previous_oauth = config.get("oauth")
-    if isinstance(previous_oauth, dict):
-        _revoke_stored_oauth(previous_oauth)
-    config["api_key"] = api_key
-    config.pop("oauth", None)
-    _write_config(config)
+    with _config_lock():
+        config = _read_config()
+        previous_oauth = config.get("oauth")
+        if isinstance(previous_oauth, dict):
+            _revoke_stored_oauth(previous_oauth)
+        config["api_key"] = api_key
+        config.pop("oauth", None)
+        _write_config_unlocked(config)
 
 
 def save_oauth_session(session) -> None:
@@ -143,32 +227,34 @@ def save_oauth_session(session) -> None:
     from tavily_cli.oauth import OAuthError
 
     replacement_oauth = _oauth_session_data(session)
-    config = _read_config()
-    previous_oauth = config.get("oauth")
-    if isinstance(previous_oauth, dict) and previous_oauth != replacement_oauth:
-        try:
-            _revoke_stored_oauth(previous_oauth)
-        except OAuthError as previous_error:
+    with _config_lock():
+        config = _read_config()
+        previous_oauth = config.get("oauth")
+        if isinstance(previous_oauth, dict) and previous_oauth != replacement_oauth:
             try:
-                _revoke_stored_oauth(replacement_oauth)
-            except OAuthError as cleanup_error:
-                raise OAuthError(
-                    f"Could not replace the previous OAuth session: {previous_error} "
-                    f"The new OAuth session also could not be revoked: {cleanup_error}"
-                ) from previous_error
-            raise OAuthError(f"Could not replace the previous OAuth session: {previous_error}") from previous_error
+                _revoke_stored_oauth(previous_oauth)
+            except OAuthError as previous_error:
+                try:
+                    _revoke_stored_oauth(replacement_oauth)
+                except OAuthError as cleanup_error:
+                    raise OAuthError(
+                        f"Could not replace the previous OAuth session: {previous_error} "
+                        f"The new OAuth session also could not be revoked: {cleanup_error}"
+                    ) from previous_error
+                raise OAuthError(f"Could not replace the previous OAuth session: {previous_error}") from previous_error
 
-    config.pop("api_key", None)
-    config["oauth"] = replacement_oauth
-    _write_config(config)
+        config.pop("api_key", None)
+        config["oauth"] = replacement_oauth
+        _write_config_unlocked(config)
 
 
 def _save_refreshed_oauth_session(session) -> None:
     """Persist refreshed tokens for the active session without revoking it."""
-    config = _read_config()
-    config.pop("api_key", None)
-    config["oauth"] = _oauth_session_data(session)
-    _write_config(config)
+    with _config_lock():
+        config = _read_config()
+        config.pop("api_key", None)
+        config["oauth"] = _oauth_session_data(session)
+        _write_config_unlocked(config)
 
 
 def has_stored_oauth() -> bool:
@@ -198,27 +284,28 @@ def get_api_base_url() -> str | None:
 
 
 def clear_credentials() -> ClearCredentialsResult:
-    oauth = _read_config().get("oauth")
-    server_revoked: bool | None = None
-    revocation_error: str | None = None
-    if isinstance(oauth, dict):
-        try:
-            if _revoke_stored_oauth(oauth):
-                server_revoked = True
-        except Exception as e:
-            # Logout must still remove local credentials even when the remote
-            # session cannot be revoked. Return the failure to the command so it
-            # can report a partial result and exit non-zero.
-            server_revoked = False
-            revocation_error = str(e) or e.__class__.__name__
-    if CONFIG_FILE.exists():
+    with _config_lock():
         config = _read_config()
-        config.pop("api_key", None)
-        config.pop("oauth", None)
-        if config:
-            _write_config(config)
-        else:
-            CONFIG_FILE.unlink()
+        oauth = config.get("oauth")
+        server_revoked: bool | None = None
+        revocation_error: str | None = None
+        if isinstance(oauth, dict):
+            try:
+                if _revoke_stored_oauth(oauth):
+                    server_revoked = True
+            except Exception as e:
+                # Logout must still remove local credentials even when the remote
+                # session cannot be revoked. Return the failure to the command so it
+                # can report a partial result and exit non-zero.
+                server_revoked = False
+                revocation_error = str(e) or e.__class__.__name__
+        if CONFIG_FILE.exists():
+            config.pop("api_key", None)
+            config.pop("oauth", None)
+            if config:
+                _write_config_unlocked(config)
+            else:
+                CONFIG_FILE.unlink()
     _clear_mcp_tokens()
     return ClearCredentialsResult(
         local_credentials_cleared=True,
@@ -354,8 +441,9 @@ def _revoke_stored_oauth(data: dict) -> bool:
 
 
 def _get_oauth_access_token(config: dict) -> str | None:
-    """Return a usable OAuth access token from config, refreshing if needed."""
+    """Return a usable OAuth access token; get_api_key holds the transaction lock."""
     from tavily_cli.oauth import (
+        OAuthError,
         OAuthSession,
         fetch_metadata,
         refresh_tokens,
@@ -379,8 +467,12 @@ def _get_oauth_access_token(config: dict) -> str | None:
         tokens = refresh_tokens(fetch_metadata(), client, refresh)
         _save_refreshed_oauth_session(OAuthSession(tokens=tokens, client=client))
         return tokens.access_token
-    except Exception:
-        return None
+    except Exception as e:
+        raise OAuthError(
+            "Could not refresh the stored Tavily OAuth session. "
+            "The stored credentials were not removed; retry the command, and run `tvly login` only if it continues. "
+            f"Details: {e}"
+        ) from e
 
 
 def get_api_key() -> str | None:
@@ -389,14 +481,15 @@ def get_api_key() -> str | None:
     if key:
         return key
 
-    config = _read_config()
-    key = config.get("api_key")
-    if key:
-        return key
+    with _config_lock():
+        config = _read_config()
+        key = config.get("api_key")
+        if key:
+            return key
 
-    token = _get_oauth_access_token(config)
-    if token:
-        return token
+        token = _get_oauth_access_token(config)
+        if token:
+            return token
 
     return _get_mcp_token()
 
@@ -406,11 +499,18 @@ def is_oauth_token(key: str) -> bool:
     return not key.startswith("tvly-") and _decode_jwt_payload(key) is not None
 
 
-def get_api_key_or_exit() -> str:
+def get_api_key_or_exit(*, json_mode: bool = False) -> str:
     """Get the API key or print an error and exit."""
     import sys
 
-    key = get_api_key()
+    from tavily_cli.oauth import OAuthError
+
+    try:
+        key = get_api_key()
+    except OAuthError as e:
+        from tavily_cli.common import handle_oauth_refresh_error
+
+        handle_oauth_refresh_error(e, json_mode)
     if not key:
         from rich.console import Console
         console = Console(stderr=True)
@@ -426,9 +526,9 @@ def get_api_key_or_exit() -> str:
     return key
 
 
-def get_client(client_name: str | None = None):
+def get_client(client_name: str | None = None, *, json_mode: bool = False):
     """Return the appropriate Tavily client (SDK or MCP) based on credential type."""
-    key = get_api_key_or_exit()
+    key = get_api_key_or_exit(json_mode=json_mode)
     return _build_keyed_client(key, client_name=client_name)
 
 
@@ -472,11 +572,18 @@ def get_client_or_keyless(client_name: str | None = None):
     )
 
 
-def require_api_key_friendly(command_name: str) -> str:
+def require_api_key_friendly(command_name: str, *, json_mode: bool = False) -> str:
     """Return the API key, or print a friendly message and exit non-zero."""
     import sys
 
-    key = get_api_key()
+    from tavily_cli.oauth import OAuthError
+
+    try:
+        key = get_api_key()
+    except OAuthError as e:
+        from tavily_cli.common import handle_oauth_refresh_error
+
+        handle_oauth_refresh_error(e, json_mode)
     if key:
         return key
 

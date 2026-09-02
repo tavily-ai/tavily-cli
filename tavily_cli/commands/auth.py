@@ -155,8 +155,7 @@ def _print_login_failure(message: str, *, json_mode: bool) -> None:
     err_console.print()
     err_console.print(f"  [#FAA2FB]> {escape(sanitize_control(message))}[/#FAA2FB]")
     err_console.print()
-    err_console.print("  If you don't have an account, sign up at [link=https://tavily.com]tavily.com[/link]")
-    err_console.print("  Or use an API key:")
+    err_console.print("  Use an API key instead:")
     err_console.print("    [#9BC0AE]tvly login --api-key tvly-YOUR_KEY[/#9BC0AE]")
     err_console.print()
 
@@ -265,7 +264,14 @@ def auth_status(ctx: click.Context, json_flag: bool) -> None:
     if not json_mode and ctx.parent and ctx.parent.obj:
         json_mode = ctx.parent.obj.get("json_output", False)
 
-    key, method, source = _effective_auth_state()
+    from tavily_cli.oauth import OAuthError
+
+    try:
+        key, method, source = _effective_auth_state()
+    except OAuthError as e:
+        from tavily_cli.common import handle_oauth_refresh_error
+
+        handle_oauth_refresh_error(e, json_mode)
 
     if json_mode:
         click.echo(json_mod.dumps({
