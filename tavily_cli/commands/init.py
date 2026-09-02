@@ -11,7 +11,7 @@ from typing import Any
 import click
 
 from tavily_cli import __version__
-from tavily_cli.common import json_option
+from tavily_cli.common import error_payload, json_option
 from tavily_cli.init_skills import (
     SKILLS_SOURCE,
     agent_specs,
@@ -212,7 +212,18 @@ def _empty_result(agents: tuple[str, ...]) -> dict[str, Any]:
 
 
 def _fail(result: dict[str, Any], stage: str, message: str, exit_code: int, json_output: bool) -> None:
-    result["error"] = {"stage": stage, "message": message}
+    code = {
+        "auth": "initialization_auth_failed",
+        "skills": "initialization_skills_failed",
+        "cli": "initialization_cli_failed",
+        "live_search": "initialization_verification_failed",
+    }.get(stage, "initialization_failed")
+    result.update(error_payload(
+        code,
+        message,
+        stage=stage,
+        retryable=stage == "live_search",
+    ))
     _print_result(result, json_output=json_output)
     raise click.exceptions.Exit(exit_code)
 

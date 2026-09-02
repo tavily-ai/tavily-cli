@@ -35,6 +35,7 @@ from tavily_cli.common import (
 @click.option("--output", "-o", "output_file", default=None, help="Save as JSON (.json) or Markdown (.md).")
 @click.option("--save", is_flag=True, default=False, help="Save JSON under .tavily/search/.")
 @click.option("--force", is_flag=True, default=False, help="Overwrite an existing output file.")
+@click.option("--jsonl", is_flag=True, default=False, help="Output one search result per JSON line.")
 @client_name_option
 @json_option
 def search(
@@ -56,6 +57,7 @@ def search(
     output_file: str | None,
     save: bool,
     force: bool,
+    jsonl: bool,
     client_name: str | None,
     json_output: bool,
 ) -> None:
@@ -68,6 +70,10 @@ def search(
     """
     from tavily_cli.config import get_client_or_keyless
     from tavily_cli.output import print_search_results, validate_artifact_options
+
+    if json_output and jsonl:
+        raise click.UsageError("Use either --json or --jsonl, not both.")
+    machine_mode = json_output or jsonl
 
     if query == "-":
         query = sys.stdin.read(100_000).strip()
@@ -115,18 +121,19 @@ def search(
 
     try:
         client, _is_keyless = get_client_or_keyless(client_name=client_name)
-        with spinner("Searching...", json_mode=json_output):
+        with spinner("Searching...", json_mode=machine_mode):
             response = client.search(**kwargs)
     except TavilyKeylessLimitError as e:
-        handle_keyless_cap_hit(e, json_output)
+        handle_keyless_cap_hit(e, machine_mode)
     except OAuthError as e:
-        handle_oauth_refresh_error(e, json_output)
+        handle_oauth_refresh_error(e, machine_mode)
     except Exception as e:
-        handle_api_error(e, json_output)
+        handle_api_error(e, machine_mode)
 
     print_search_results(
         response,
         json_mode=json_output,
+        jsonl_mode=jsonl,
         output_file=output_file,
         save=save,
         force=force,

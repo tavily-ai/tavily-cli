@@ -215,6 +215,11 @@ tvly auth --json
 tvly extract https://example.com --json
 tvly update --check --json
 
+# Explicit JSON Lines for result sets and research streams
+tvly search "query" --jsonl
+tvly extract https://example.com https://example.org --jsonl
+tvly research "question" --stream --jsonl
+
 # Durable artifacts: format follows the extension
 tvly search "query" -o results.json
 tvly extract https://example.com -o article.md
@@ -246,6 +251,25 @@ tvly --status --json   # structured status
 always forces JSON. Saved commands print only a short summary and the artifact
 path; existing files are preserved unless `--force` is provided.
 
+Machine-readable failures use one stable envelope on stdout; progress and
+diagnostics remain on stderr:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "research_timeout",
+    "message": "Research timed out after 600s.",
+    "stage": "poll",
+    "retryable": true,
+    "request_id": "request-id"
+  }
+}
+```
+
+`--json` emits one JSON document. `--jsonl` emits typed result records followed
+by a summary record; with research streaming, each API event is one line.
+
 ### Exit Codes
 
 | Code | Meaning |
@@ -253,8 +277,9 @@ path; existing files are preserved unless `--force` is provided.
 | 0 | Success |
 | 1 | Local setup or update error |
 | 2 | Invalid input / usage error |
-| 3 | Authentication error |
+| 3 | Authentication or usage-limit error |
 | 4 | API or update-check error |
+| 5 | Partial result treated as failure by `--fail-on-partial` |
 
 ## Command Reference
 
@@ -278,6 +303,7 @@ path; existing files are preserved unless `--force` is provided.
 | `-o` / `--output` | Save JSON (`.json`) or Markdown (`.md`) |
 | `--save` | Save JSON to a generated path under `.tavily/search/` |
 | `--force` | Overwrite an existing `--output` file |
+| `--jsonl` | Emit one result per JSON line, followed by a summary |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly update`
@@ -308,6 +334,8 @@ automation can distinguish an available release from a supported self-update.
 | `-o` / `--output` | Save JSON (`.json`) or complete Markdown (`.md`) |
 | `--save` | Save JSON to a generated path under `.tavily/extract/` |
 | `--force` | Overwrite an existing `--output` file |
+| `--fail-on-partial` | Exit 5 if any requested URL fails |
+| `--jsonl` | Emit one extraction per JSON line, followed by a summary |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly crawl`
@@ -330,6 +358,7 @@ automation can distinguish an available release from a supported self-update.
 | `--timeout` | Max wait (10-150 seconds) |
 | `-o` / `--output` | Save JSON to file |
 | `--output-dir` | Save each page as .md file in directory |
+| `--jsonl` | Emit one crawled page per JSON line, followed by a summary |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly map`
@@ -347,6 +376,7 @@ automation can distinguish an available release from a supported self-update.
 | `-o` / `--output` | Save JSON (`.json`) or Markdown (`.md`) |
 | `--save` | Save JSON to a generated path under `.tavily/map/` |
 | `--force` | Overwrite an existing `--output` file |
+| `--jsonl` | Emit one discovered URL per JSON line, followed by a summary |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly research <query>` / `tvly research run <query>`
@@ -363,6 +393,7 @@ automation can distinguish an available release from a supported self-update.
 | `-o` / `--output` | Save JSON (`.json`) or Markdown (`.md`) |
 | `--save` | Save `report.md` and `report.json` under `.tavily/research/` |
 | `--force` | Overwrite existing output files |
+| `--jsonl` | Emit one streaming event per line (or one final non-stream result) |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly research status`

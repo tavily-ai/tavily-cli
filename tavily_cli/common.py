@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import json
 import re
+from typing import Any
 
 import click
 from tavily import TavilyKeylessLimitError
@@ -39,18 +40,65 @@ class TavilyAPIError(Exception):
         self.docs = docs
 
 
+def error_payload(
+    code: str,
+    message: object,
+    *,
+    stage: str,
+    retryable: bool,
+    request_id: str | None = None,
+    **details: Any,
+) -> dict[str, Any]:
+    """Build the stable machine-readable failure envelope."""
+    error: dict[str, Any] = {
+        "code": code,
+        "message": sanitize_control(message),
+        "stage": stage,
+        "retryable": retryable,
+    }
+    if request_id:
+        error["request_id"] = request_id
+    error.update({key: value for key, value in details.items() if value is not None})
+    return {"ok": False, "error": error}
+
+
+def emit_error(
+    code: str,
+    message: object,
+    *,
+    stage: str,
+    retryable: bool,
+    request_id: str | None = None,
+    **details: Any,
+) -> None:
+    """Write one stable error document to stdout."""
+    click.echo(
+        json.dumps(
+            error_payload(
+                code,
+                message,
+                stage=stage,
+                retryable=retryable,
+                request_id=request_id,
+                **details,
+            ),
+            ensure_ascii=False,
+        )
+    )
+
+
 def handle_keyless_cap_hit(e: TavilyKeylessLimitError, json_mode: bool) -> None:
     """Render a keyless rate-limit cap-hit and exit non-zero."""
     if json_mode:
-        click.echo(json.dumps({
-            "error": {
-                "code": e.code,
-                "message": e.message,
-                "window": e.window,
-                "retry_after_seconds": e.retry_after_seconds,
-                "next_actions": e.next_actions,
-            }
-        }))
+        emit_error(
+            e.code,
+            e.message,
+            stage="request",
+            retryable=e.retry_after_seconds is not None,
+            window=e.window,
+            retry_after_seconds=e.retry_after_seconds,
+            next_actions=e.next_actions,
+        )
         raise SystemExit(3)
 
     from tavily_cli.theme import err_console
@@ -81,12 +129,12 @@ def handle_oauth_refresh_error(e: Exception, json_mode: bool) -> None:
     """Render a stored OAuth refresh failure without treating it as logout."""
     message = sanitize_control(e)
     if json_mode:
-        click.echo(json.dumps({
-            "error": {
-                "code": "oauth_refresh_failed",
-                "message": message,
-            }
-        }))
+        emit_error(
+            "oauth_refresh_failed",
+            message,
+            stage="auth",
+            retryable=True,
+        )
         raise SystemExit(3)
 
     from rich.markup import escape
@@ -124,11 +172,38 @@ def client_name_option(func):
 _LIMIT_STATUSES = {429, 432}
 
 
-def handle_api_error(e: Exception, json_mode: bool) -> None:
+def handle_api_error(
+    e: Exception,
+    json_mode: bool,
+    *,
+    code: str | None = None,
+    stage: str = "request",
+    retryable: bool | None = None,
+    request_id: str | None = None,
+) -> None:
     """Print an API error and exit."""
+    status = e.status if isinstance(e, TavilyAPIError) else None
+    is_limit = status in _LIMIT_STATUSES
+    if code is None:
+        if status == 401:
+            code = "authentication_failed"
+        elif is_limit:
+            code = "api_limit_reached"
+        else:
+            code = "api_error"
+    if retryable is None:
+        retryable = status == 429
+
     if json_mode:
-        click.echo(json.dumps({"error": str(e)}))
-        raise SystemExit(4)
+        emit_error(
+            code,
+            e,
+            stage=stage,
+            retryable=retryable,
+            request_id=request_id,
+            status=status,
+        )
+        raise SystemExit(3 if is_limit else 4)
 
     from urllib.parse import urlparse
 
@@ -138,7 +213,7 @@ def handle_api_error(e: Exception, json_mode: bool) -> None:
 
     message = escape(sanitize_control(e))
 
-    if isinstance(e, TavilyAPIError) and e.status in _LIMIT_STATUSES:
+    if isinstance(e, TavilyAPIError) and is_limit:
         err_console.print()
         err_console.print(f"  [#FFC769]>[/#FFC769] {message}")
         err_console.print()

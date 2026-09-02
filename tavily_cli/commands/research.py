@@ -9,7 +9,7 @@ import time
 import click
 from rich.markup import escape
 
-from tavily_cli.common import client_name_option, handle_api_error, sanitize_control
+from tavily_cli.common import client_name_option, emit_error, handle_api_error, sanitize_control
 
 
 class ResearchGroup(click.Group):
@@ -58,6 +58,78 @@ def _resolve_json(ctx: click.Context, local_flag: bool) -> bool:
     return False
 
 
+def _research_failure_message(response: dict) -> str:
+    error = response.get("error")
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("detail") or "Research task failed.")
+    return str(error or response.get("detail") or "Research task failed.")
+
+
+def _fail_research(
+    response: dict,
+    *,
+    code: str,
+    stage: str,
+    retryable: bool,
+    request_id: str | None,
+    machine_mode: bool,
+) -> None:
+    """Emit one stable failure and terminate research with an operational error."""
+    message = _research_failure_message(response)
+    if machine_mode:
+        emit_error(
+            code,
+            message,
+            stage=stage,
+            retryable=retryable,
+            request_id=request_id,
+        )
+    else:
+        from tavily_cli.theme import err_console
+
+        err_console.print(f"  [#FAA2FB]> Research failed:[/#FAA2FB] {escape(sanitize_control(message))}")
+    raise click.exceptions.Exit(4)
+
+
+def _stream_json_events(stream_resp):
+    """Parse SSE data events into records suitable for explicit JSONL output."""
+    for chunk in stream_resp:
+        text = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+        for line in text.splitlines():
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if not payload:
+                continue
+            try:
+                event = json.loads(payload)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(event, dict):
+                yield event
+                if event.get("object") == "error" or event.get("error"):
+                    error = event.get("error")
+                    if isinstance(error, dict):
+                        error = error.get("message") or error.get("detail") or error
+                    raise RuntimeError(str(error or "Research stream failed."))
+
+
+def _emit_research_jsonl(records, *, output_file: str | None, force: bool) -> None:
+    """Stream JSONL to stdout, or atomically write it and report the path."""
+    from tavily_cli.output import emit_jsonl
+
+    if output_file:
+        emit_jsonl(list(records), output_file=output_file, force=force)
+        click.echo(json.dumps({
+            "ok": True,
+            "saved": True,
+            "artifacts": [output_file],
+        }, ensure_ascii=False))
+        return
+    for record in records:
+        click.echo(json.dumps(record, ensure_ascii=False))
+
+
 def _render_stream(
     stream_resp,
     *,
@@ -85,6 +157,12 @@ def _render_stream(
             except (json.JSONDecodeError, TypeError):
                 continue
 
+            if data.get("object") == "error" or data.get("error"):
+                error = data.get("error")
+                if isinstance(error, dict):
+                    error = error.get("message") or error.get("detail") or error
+                raise RuntimeError(str(error or "Research stream failed."))
+
             delta = (data.get("choices") or [{}])[0].get("delta", {})
 
             # --- Tool calls: show live status updates ---
@@ -108,8 +186,10 @@ def _render_stream(
 
             # --- Content: collect the report text ---
             content = delta.get("content")
-            if content:
+            if isinstance(content, str) and content:
                 content_parts.append(content)
+            elif content is not None:
+                content_parts = [content]
 
             # --- Sources: collect final source list ---
             src_list = delta.get("sources")
@@ -117,7 +197,11 @@ def _render_stream(
                 sources = src_list
 
     # Render using the same formatter as non-stream output.
-    full_content = "".join(content_parts)
+    full_content = (
+        content_parts[0]
+        if len(content_parts) == 1 and not isinstance(content_parts[0], str)
+        else "".join(content_parts)
+    )
     result = {
         "status": "completed",
         "content": full_content,
@@ -145,6 +229,7 @@ def _render_stream(
 @click.option("--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
 @click.option("--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
 @click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
+@click.option("--jsonl", is_flag=True, default=False, help="Output one streaming event per JSON line.")
 @client_name_option
 @click.pass_context
 def run(
@@ -161,6 +246,7 @@ def run(
     poll_interval: int,
     timeout: int,
     json_flag: bool,
+    jsonl: bool,
     client_name: str | None,
 ) -> None:
     """Start a research task.
@@ -175,6 +261,11 @@ def run(
     from tavily_cli.output import emit, print_research_result, validate_artifact_options
 
     json_mode = _resolve_json(ctx, json_flag)
+    if json_mode and jsonl:
+        raise click.UsageError("Use either --json or --jsonl, not both.")
+    if jsonl and save:
+        raise click.UsageError("--jsonl cannot be combined with --save; use --output FILE.jsonl.")
+    machine_mode = json_mode or jsonl
 
     if query == "-":
         query = sys.stdin.read(100_000).strip()
@@ -187,13 +278,36 @@ def run(
         force=force,
     )
 
-    require_api_key_friendly("research", json_mode=json_mode)
-    client = get_client(client_name=client_name, json_mode=json_mode)
-
     schema = None
     if output_schema:
-        with open(output_schema) as f:
-            schema = json.load(f)
+        try:
+            with open(output_schema, encoding="utf-8") as f:
+                schema = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            message = f"Could not load output schema: {e}"
+            if machine_mode:
+                emit_error(
+                    "invalid_output_schema",
+                    message,
+                    stage="validation",
+                    retryable=False,
+                )
+                raise click.exceptions.Exit(2) from e
+            raise click.UsageError(message) from e
+        if not isinstance(schema, dict) or not isinstance(schema.get("properties"), dict):
+            message = "Output schema must be a JSON object containing a properties object."
+            if machine_mode:
+                emit_error(
+                    "invalid_output_schema",
+                    message,
+                    stage="validation",
+                    retryable=False,
+                )
+                raise click.exceptions.Exit(2)
+            raise click.UsageError(message)
+
+    require_api_key_friendly("research", json_mode=machine_mode)
+    client = get_client(client_name=client_name, json_mode=machine_mode)
 
     kwargs: dict = {"input": query}
     if model is not None:
@@ -209,25 +323,12 @@ def run(
         kwargs["stream"] = True
         try:
             stream_resp = client.research(**kwargs)
-            if json_mode and not (output_file or save):
-                # Re-serialize each SSE event as one JSON line (NDJSON) rather
-                # than forwarding raw SSE bytes: this keeps the output valid,
-                # machine-parseable JSON and lets json.dumps escape any control
-                # characters in server content (raw bytes would otherwise reach
-                # the terminal as escape sequences).
-                for chunk in stream_resp:
-                    text = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
-                    for line in text.splitlines():
-                        if not line.startswith("data:"):
-                            continue
-                        payload = line[5:].strip()
-                        if not payload:
-                            continue
-                        try:
-                            event = json.loads(payload)
-                        except (json.JSONDecodeError, TypeError):
-                            continue
-                        click.echo(json.dumps(event, ensure_ascii=False))
+            if jsonl:
+                _emit_research_jsonl(
+                    _stream_json_events(stream_resp),
+                    output_file=output_file,
+                    force=force,
+                )
             else:
                 _render_stream(
                     stream_resp,
@@ -239,18 +340,30 @@ def run(
         except click.ClickException:
             raise
         except Exception as e:
-            handle_api_error(e, json_mode)
+            handle_api_error(e, machine_mode, stage="stream", retryable=True)
         return
 
     try:
-        with spinner("Starting research...", json_mode=json_mode):
+        with spinner("Starting research...", json_mode=machine_mode):
             result = client.research(**kwargs)
     except Exception as e:
-        handle_api_error(e, json_mode)
+        handle_api_error(e, machine_mode, stage="submit")
 
     # If the initial response is already complete (e.g., MCP endpoint returns
     # the full result synchronously), skip polling entirely.
     if result.get("status") in ("completed", "failed") or result.get("content"):
+        if result.get("status") == "failed":
+            _fail_research(
+                result,
+                code="research_failed",
+                stage="submit",
+                retryable=False,
+                request_id=result.get("request_id"),
+                machine_mode=machine_mode,
+            )
+        if jsonl:
+            _emit_research_jsonl([result], output_file=output_file, force=force)
+            return
         print_research_result(
             result,
             json_mode=json_mode,
@@ -263,10 +376,13 @@ def run(
     request_id = result.get("request_id")
     if not request_id:
         # No request_id and not complete — unexpected response.
-        handle_api_error(RuntimeError(f"Unexpected API response: {result}"), json_mode)
+        handle_api_error(RuntimeError(f"Unexpected API response: {result}"), machine_mode, stage="submit")
 
     if no_wait:
         pending_result = {"request_id": request_id, "status": result.get("status", "pending")}
+        if jsonl:
+            _emit_research_jsonl([pending_result], output_file=output_file, force=force)
+            return
         if output_file or save:
             print_research_result(
                 pending_result,
@@ -281,30 +397,26 @@ def run(
 
     elapsed = 0
     response = result
-    if json_mode:
-        # JSON mode: poll silently
+    if machine_mode:
+        # Machine modes: poll silently.
         while elapsed < timeout:
             try:
                 response = client.get_research(request_id)
             except Exception as e:
-                handle_api_error(e, json_mode)
+                handle_api_error(e, machine_mode, stage="poll", retryable=True, request_id=request_id)
             if response.get("status") in ("completed", "failed"):
                 break
             time.sleep(poll_interval)
             elapsed += poll_interval
         else:
-            timeout_result = {"request_id": request_id, "status": "timeout"}
-            if output_file or save:
-                print_research_result(
-                    timeout_result,
-                    json_mode=json_mode,
-                    output_file=output_file,
-                    save=save,
-                    force=force,
-                )
-            else:
-                emit(timeout_result, json_mode=True)
-            return
+            _fail_research(
+                {"error": f"Research timed out after {timeout}s."},
+                code="research_timeout",
+                stage="poll",
+                retryable=True,
+                request_id=request_id,
+                machine_mode=True,
+            )
     else:
         # Rich mode: live spinner with running elapsed time
         with err_console.status("", spinner="dots") as live:
@@ -315,7 +427,7 @@ def run(
                     try:
                         response = client.get_research(request_id)
                     except Exception as e:
-                        handle_api_error(e, json_mode)
+                        handle_api_error(e, json_mode, stage="poll", retryable=True, request_id=request_id)
                     if response.get("status", "unknown") in ("completed", "failed"):
                         break
                     next_poll = elapsed + poll_interval
@@ -323,15 +435,28 @@ def run(
                 elapsed += 1
             else:
                 err_console.print(f"[#FFC769]Timed out after {timeout}s. Resume with: tvly research poll {escape(sanitize_control(request_id))}[/#FFC769]")
-                if output_file or save:
-                    print_research_result(
-                        {"request_id": request_id, "status": "timeout"},
-                        json_mode=json_mode,
-                        output_file=output_file,
-                        save=save,
-                        force=force,
-                    )
-                return
+                _fail_research(
+                    {"error": f"Research timed out after {timeout}s."},
+                    code="research_timeout",
+                    stage="poll",
+                    retryable=True,
+                    request_id=request_id,
+                    machine_mode=False,
+                )
+
+    if response.get("status") == "failed":
+        _fail_research(
+            response,
+            code="research_failed",
+            stage="poll",
+            retryable=False,
+            request_id=request_id,
+            machine_mode=machine_mode,
+        )
+
+    if jsonl:
+        _emit_research_jsonl([response], output_file=output_file, force=force)
+        return
 
     print_research_result(
         response,
@@ -359,7 +484,17 @@ def status(ctx: click.Context, request_id: str, json_flag: bool, client_name: st
     try:
         response = client.get_research(request_id)
     except Exception as e:
-        handle_api_error(e, json_mode)
+        handle_api_error(e, json_mode, stage="status", retryable=True, request_id=request_id)
+
+    if response.get("status") == "failed":
+        _fail_research(
+            response,
+            code="research_failed",
+            stage="status",
+            retryable=False,
+            request_id=request_id,
+            machine_mode=json_mode,
+        )
 
     if json_mode:
         emit(response, json_mode=True)
@@ -399,7 +534,7 @@ def poll(
 ) -> None:
     """Poll a research task until completion and return results."""
     from tavily_cli.config import get_client, require_api_key_friendly
-    from tavily_cli.output import emit, print_research_result, validate_artifact_options
+    from tavily_cli.output import print_research_result, validate_artifact_options
     from tavily_cli.theme import err_console
 
     json_mode = _resolve_json(ctx, json_flag)
@@ -418,24 +553,20 @@ def poll(
             try:
                 response = client.get_research(request_id)
             except Exception as e:
-                handle_api_error(e, json_mode)
+                handle_api_error(e, json_mode, stage="poll", retryable=True, request_id=request_id)
             if response.get("status") in ("completed", "failed"):
                 break
             time.sleep(poll_interval)
             elapsed += poll_interval
         else:
-            timeout_result = {"request_id": request_id, "status": "timeout"}
-            if output_file or save:
-                print_research_result(
-                    timeout_result,
-                    json_mode=json_mode,
-                    output_file=output_file,
-                    save=save,
-                    force=force,
-                )
-            else:
-                emit(timeout_result, json_mode=True)
-            return
+            _fail_research(
+                {"error": f"Research timed out after {timeout}s."},
+                code="research_timeout",
+                stage="poll",
+                retryable=True,
+                request_id=request_id,
+                machine_mode=True,
+            )
     else:
         with err_console.status("", spinner="dots") as live:
             next_poll = 0
@@ -445,7 +576,7 @@ def poll(
                     try:
                         response = client.get_research(request_id)
                     except Exception as e:
-                        handle_api_error(e, json_mode)
+                        handle_api_error(e, json_mode, stage="poll", retryable=True, request_id=request_id)
                     if response.get("status") in ("completed", "failed"):
                         break
                     next_poll = elapsed + poll_interval
@@ -453,15 +584,24 @@ def poll(
                 elapsed += 1
             else:
                 err_console.print(f"[#FFC769]Timed out after {timeout}s.[/#FFC769]")
-                if output_file or save:
-                    print_research_result(
-                        {"request_id": request_id, "status": "timeout"},
-                        json_mode=json_mode,
-                        output_file=output_file,
-                        save=save,
-                        force=force,
-                    )
-                return
+                _fail_research(
+                    {"error": f"Research timed out after {timeout}s."},
+                    code="research_timeout",
+                    stage="poll",
+                    retryable=True,
+                    request_id=request_id,
+                    machine_mode=False,
+                )
+
+    if response.get("status") == "failed":
+        _fail_research(
+            response,
+            code="research_failed",
+            stage="poll",
+            retryable=False,
+            request_id=request_id,
+            machine_mode=json_mode,
+        )
 
     print_research_result(
         response,
