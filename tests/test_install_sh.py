@@ -257,7 +257,7 @@ exit 0
 
 
 @pytest.mark.skipif(pty is None, reason="install.sh is a POSIX installer")
-def test_existing_pipx_install_does_not_rerun_init(tmp_path: Path) -> None:
+def test_existing_pipx_install_upgrades_without_rerunning_init(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log_file = tmp_path / "calls.log"
@@ -309,7 +309,6 @@ exit 0
     assert status == 0
     assert log_file.read_text().splitlines() == [
         "pipx list --short",
-        "pipx install tavily-cli",
         "pipx upgrade tavily-cli",
         "tvly --version",
     ]

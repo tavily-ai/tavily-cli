@@ -110,11 +110,11 @@ main() {
 
         if command -v pipx >/dev/null 2>&1; then
             info "Installing ${PACKAGE_NAME} with pipx..."
-            if ! pipx list --short 2>/dev/null | grep -q "^${PACKAGE_NAME} "; then
-                FRESH_INSTALL=1
-            fi
-            if ! pipx install "$PACKAGE_NAME"; then
+            if pipx list --short 2>/dev/null | grep -q "^${PACKAGE_NAME} "; then
                 pipx upgrade "$PACKAGE_NAME"
+            else
+                FRESH_INSTALL=1
+                pipx install "$PACKAGE_NAME"
             fi
         else
             info "Installing ${PACKAGE_NAME} with pip..."
