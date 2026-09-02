@@ -157,7 +157,7 @@ def test_init_failure_does_not_fail_successful_install(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(pty is None, reason="install.sh is a POSIX installer")
-def test_existing_uv_install_does_not_rerun_init(tmp_path: Path) -> None:
+def test_existing_uv_install_upgrades_without_rerunning_init(tmp_path: Path) -> None:
     env = _stub_environment(tmp_path, installed=True)
     env["DISPLAY"] = ":0"
 
@@ -166,7 +166,7 @@ def test_existing_uv_install_does_not_rerun_init(tmp_path: Path) -> None:
     assert status == 0
     assert (tmp_path / "calls.log").read_text().splitlines() == [
         "uv tool list",
-        "uv tool install tavily-cli",
+        "uv tool upgrade tavily-cli",
         "tvly --version",
     ]
     assert "Starting guided Tavily setup" not in output
@@ -174,18 +174,16 @@ def test_existing_uv_install_does_not_rerun_init(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(pty is None, reason="install.sh is a POSIX installer")
-def test_failed_uv_reinstall_falls_back_to_upgrade_without_init(tmp_path: Path) -> None:
-    env = _stub_environment(tmp_path, installed=True, install_exit=1)
+def test_failed_fresh_uv_install_exits_without_running_init(tmp_path: Path) -> None:
+    env = _stub_environment(tmp_path, install_exit=1)
     env["DISPLAY"] = ":0"
 
     status, output = _run_with_terminal(env)
 
-    assert status == 0
+    assert status == 1
     assert (tmp_path / "calls.log").read_text().splitlines() == [
         "uv tool list",
         "uv tool install tavily-cli",
-        "uv tool upgrade tavily-cli",
-        "tvly --version",
     ]
     assert "Starting guided Tavily setup" not in output
 

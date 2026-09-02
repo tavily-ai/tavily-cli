@@ -94,11 +94,11 @@ main() {
     # Install via uv (fastest) — no system Python required
     if command -v uv >/dev/null 2>&1; then
         info "Installing ${PACKAGE_NAME} with uv..."
-        if ! uv tool list 2>/dev/null | grep -q "^${PACKAGE_NAME} "; then
-            FRESH_INSTALL=1
-        fi
-        if ! uv tool install "$PACKAGE_NAME"; then
+        if uv tool list 2>/dev/null | grep -q "^${PACKAGE_NAME} "; then
             uv tool upgrade "$PACKAGE_NAME"
+        else
+            FRESH_INSTALL=1
+            uv tool install "$PACKAGE_NAME"
         fi
     else
         # Find Python (needed for pipx / pip)
