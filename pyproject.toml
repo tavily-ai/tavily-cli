@@ -56,6 +56,16 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["tavily_cli"]
 
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "tavily_cli",
+    "tests",
+    "install.sh",
+    "pyproject.toml",
+    "README.md",
+    "LICENSE",
+]
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"
