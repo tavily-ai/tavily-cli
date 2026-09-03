@@ -49,7 +49,7 @@ def _parse_json_list(value: str | None, flag_name: str) -> list | None:
 
 def _post_feedback(client, payload: dict) -> dict:
     """POST /feedback using the client's own authenticated session."""
-    response = client.session.post(f"{client.base_url}/feedback", json=payload, timeout=30)
+    response = client.session.post(f"{client.base_url}/feedback", json=payload, timeout=10)
     if not response.ok:
         client._handle_error_response(response)
     return response.json()
