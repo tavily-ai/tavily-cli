@@ -95,8 +95,8 @@ def feedback(
     if not session_id and not request_id:
         raise click.UsageError("Either --session-id or --request-id is required.")
 
-    require_api_key_friendly("feedback")
-    client = get_client(client_name=client_name)
+    require_api_key_friendly("feedback", json_mode=json_output)
+    client = get_client(client_name=client_name, json_mode=json_output)
 
     kwargs: dict = {}
     if session_id is not None:

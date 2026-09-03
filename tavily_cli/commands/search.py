@@ -5,10 +5,15 @@ from __future__ import annotations
 import sys
 
 import click
-
 from tavily import TavilyKeylessLimitError
 
-from tavily_cli.common import client_name_option, handle_api_error, handle_keyless_cap_hit, json_option
+from tavily_cli.common import (
+    client_name_option,
+    handle_api_error,
+    handle_keyless_cap_hit,
+    handle_oauth_refresh_error,
+    json_option,
+)
 
 
 @click.command()
@@ -65,8 +70,6 @@ def search(
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
 
-    client, _is_keyless = get_client_or_keyless(client_name=client_name)
-
     kwargs: dict = {"query": query}
     if search_depth is not None:
         kwargs["search_depth"] = search_depth
@@ -97,13 +100,17 @@ def search(
     if chunks_per_source is not None:
         kwargs["chunks_per_source"] = chunks_per_source
 
+    from tavily_cli.oauth import OAuthError
     from tavily_cli.theme import spinner
 
     try:
+        client, _is_keyless = get_client_or_keyless(client_name=client_name)
         with spinner("Searching...", json_mode=json_output):
             response = client.search(**kwargs)
     except TavilyKeylessLimitError as e:
         handle_keyless_cap_hit(e, json_output)
+    except OAuthError as e:
+        handle_oauth_refresh_error(e, json_output)
     except Exception as e:
         handle_api_error(e, json_output)
 

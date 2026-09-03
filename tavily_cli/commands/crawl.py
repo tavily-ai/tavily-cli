@@ -57,8 +57,8 @@ def crawl(
     from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import print_crawl_results
 
-    require_api_key_friendly("crawl")
-    client = get_client(client_name=client_name)
+    require_api_key_friendly("crawl", json_mode=json_output)
+    client = get_client(client_name=client_name, json_mode=json_output)
 
     kwargs: dict = {"url": url}
     if max_depth is not None:

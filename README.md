@@ -14,10 +14,24 @@ CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, ex
 - **Website Crawling** — Crawl sites with depth/breadth control and path filtering
 - **URL Discovery** — Map all URLs on a site without content extraction
 - **Deep Research** — AI-powered research with citations and structured output
+- **Self-Update** — Check for and install CLI updates through the original package manager
 
 ## Installation
 
 Requires **Python 3.10+**.
+
+### Guided installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tavily-ai/tavily-cli/main/install.sh | sh
+```
+
+On a fresh interactive desktop installation, the installer starts `tvly init`
+to guide authentication, agent detection, skill installation, and verification.
+In CI, SSH/headless, and other non-interactive environments, run `tvly init`
+separately after installation.
+
+### Package manager
 
 ```bash
 pip install tavily-cli
@@ -30,6 +44,18 @@ git clone https://github.com/tavily-ai/tavily-cli.git
 cd tavily-cli
 pip install -e .
 ```
+
+### Updating
+
+```bash
+# Check without changing the installation
+tvly update --check
+
+# Update through uv, pipx, or pip
+tvly update
+```
+
+Source and direct-URL installations are detected and must be updated from their original source.
 
 ## Quick Start
 
@@ -49,14 +75,17 @@ tvly extract https://example.com
 ### 1. Authenticate
 
 ```bash
-# Set API key directly
+# Browser OAuth (no Node.js required)
+tvly login
+
+# Headless / SSH: print the URL instead of opening a browser
+tvly login --no-browser
+
+# Or set API key directly
 tvly login --api-key tvly-YOUR_KEY
 
 # Or use environment variable
 export TAVILY_API_KEY=tvly-YOUR_KEY
-
-# Or OAuth (opens browser)
-tvly login
 
 # Check auth status
 tvly auth
@@ -179,6 +208,7 @@ tvly
 ├── extract <urls...>           # Extract content from URLs
 ├── crawl <url>                 # Crawl a website
 ├── map <url>                   # Discover URLs (no content)
+├── update                      # Check for or install CLI updates
 ├── research <query>            # Deep research (async)
 │   ├── run <query>             # Start a research task (same as above)
 │   ├── status <id>             # Check task status
@@ -195,6 +225,7 @@ All commands support `--json` output and can be fully controlled via CLI argumen
 tvly search "query" --json
 tvly auth --json
 tvly extract https://example.com --json
+tvly update --check --json
 
 # Read input from stdin with "-"
 echo "What is the latest funding for Anthropic?" | tvly search - --json
@@ -216,9 +247,10 @@ tvly --status --json   # structured status
 | Code | Meaning |
 |------|---------|
 | 0 | Success |
+| 1 | Local setup or update error |
 | 2 | Invalid input / usage error |
 | 3 | Authentication error |
-| 4 | API error |
+| 4 | API or update-check error |
 
 ## Command Reference
 
@@ -241,6 +273,21 @@ tvly --status --json   # structured status
 | `--chunks-per-source` | Chunks per source (advanced/fast depth only) |
 | `-o` / `--output` | Save output to file |
 | `--client-name` | Set optional `client_name` for request attribution |
+
+### `tvly update`
+
+Check PyPI for the latest Tavily CLI release and update through the package
+manager responsible for the active installation.
+
+```bash
+tvly update --check
+tvly update
+tvly update --check --json
+```
+
+`--check` is read-only. Source/direct-URL installations are reported without
+being modified. JSON output includes `can_update` and `blocked_reason` so
+automation can distinguish an available release from a supported self-update.
 
 ### `tvly extract`
 
