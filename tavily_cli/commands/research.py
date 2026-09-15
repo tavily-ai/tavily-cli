@@ -58,6 +58,29 @@ def _resolve_json(ctx: click.Context, local_flag: bool) -> bool:
     return False
 
 
+def _is_synchronous_transport(client) -> bool:
+    """True for the MCP transport, which OAuth credentials are routed through.
+
+    That endpoint runs research to completion inside the initial call and exposes
+    no research-lookup tool, so a request_id is never issued and nothing can be
+    polled afterwards.
+    """
+    from tavily_cli.mcp_client import McpTavilyClient
+
+    return isinstance(client, McpTavilyClient)
+
+
+def _reject_async_on_synchronous_transport(client, subject: str, alternative: str) -> None:
+    """Fail fast when an async-only research feature cannot work on this transport."""
+    if not _is_synchronous_transport(client):
+        return
+    raise click.UsageError(
+        f"{subject} is not supported with browser (OAuth) authentication: research runs "
+        f"to completion in a single call and no request_id is issued. {alternative}, or "
+        "re-run with an API key (tvly login --api-key tvly-...)."
+    )
+
+
 def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
     """Parse SSE stream chunks, show live status, then render with Rich like non-stream."""
     from tavily_cli.output import print_research_result
@@ -166,6 +189,14 @@ def run(
 
     require_api_key_friendly("research", json_mode=json_mode)
     client = get_client(client_name=client_name, json_mode=json_mode)
+
+    if no_wait:
+        # Checked before the request so a caller that cannot use the synchronous
+        # result is not billed for one, and so agents batching --no-wait calls
+        # learn immediately instead of blocking through every run in turn.
+        _reject_async_on_synchronous_transport(
+            client, "--no-wait", "Drop --no-wait to get the report from the same call"
+        )
 
     schema = None
     if output_schema:
@@ -284,6 +315,9 @@ def status(ctx: click.Context, request_id: str, json_flag: bool, client_name: st
     json_mode = _resolve_json(ctx, json_flag)
     require_api_key_friendly("research status", json_mode=json_mode)
     client = get_client(client_name=client_name, json_mode=json_mode)
+    _reject_async_on_synchronous_transport(
+        client, "tvly research status", 'Run tvly research "<query>" to get results in one call'
+    )
 
     try:
         response = client.get_research(request_id)
@@ -330,6 +364,9 @@ def poll(
     json_mode = _resolve_json(ctx, json_flag)
     require_api_key_friendly("research poll", json_mode=json_mode)
     client = get_client(client_name=client_name, json_mode=json_mode)
+    _reject_async_on_synchronous_transport(
+        client, "tvly research poll", 'Run tvly research "<query>" to get results in one call'
+    )
 
     elapsed = 0
     response = {}

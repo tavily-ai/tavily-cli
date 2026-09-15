@@ -176,7 +176,7 @@ tvly research "Electric vehicle market analysis" --model pro
 # Stream results in real-time
 tvly research "AI market trends" --stream
 
-# Async: start and poll separately
+# Async: start and poll separately (API-key auth only)
 tvly research "topic" --no-wait --json        # returns request_id
 tvly research status <request_id> --json      # check status
 tvly research poll <request_id> --json        # wait and get result
@@ -219,7 +219,7 @@ tvly update --check --json
 echo "What is the latest funding for Anthropic?" | tvly search - --json
 echo "Research question" | tvly research - --json
 
-# Async research: launch then poll separately
+# Async research: launch then poll separately (API-key auth only)
 tvly research "question" --no-wait --json        # returns request_id
 tvly research status <id> --json                 # check status
 tvly research poll <id> --json                   # wait and get result
@@ -341,13 +341,15 @@ automation can distinguish an available release from a supported self-update.
 | `-o` / `--output` | Save output to file |
 | `--client-name` | Set optional `client_name` for request attribution |
 
+Asynchronous research (`--no-wait`, `status`, `poll`) requires API-key authentication. Browser (OAuth) credentials are routed through the MCP endpoint, which runs research to completion in a single call and issues no request_id.
+
 ### `tvly research status`
 
-Check research task status by request ID. Supports `--client-name`.
+Check research task status by request ID. Supports `--client-name`. Requires API-key authentication.
 
 ### `tvly research poll`
 
-Poll until completion and return results. Same `--poll-interval`, `--timeout`, `-o`, and `--client-name` options as `run`.
+Poll until completion and return results. Same `--poll-interval`, `--timeout`, `-o`, and `--client-name` options as `run`. Requires API-key authentication.
 
 ## Environment Variables
 
