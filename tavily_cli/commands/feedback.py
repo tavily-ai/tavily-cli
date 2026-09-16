@@ -37,11 +37,11 @@ def _parse_json_list(value: str | None, flag_name: str) -> list | None:
         except OSError:
             is_file = False
         if not is_file:
-            raise click.UsageError(f"{flag_name} must be a JSON array or a path to a JSON file.")
+            raise click.UsageError(f"{flag_name} must be a JSON array or a path to a JSON file.") from None
         try:
             data = json.loads(Path(value).read_text())
         except json.JSONDecodeError as e:
-            raise click.UsageError(f"{flag_name} must be a JSON array or a path to a JSON file: {e}")
+            raise click.UsageError(f"{flag_name} must be a JSON array or a path to a JSON file: {e}") from e
     if not isinstance(data, list):
         raise click.UsageError(f"{flag_name} must be a JSON array.")
     return data
