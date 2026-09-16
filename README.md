@@ -7,6 +7,7 @@ CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, ex
 
 ## Features
 
+- **One-Command Setup** — Authenticate, install Tavily skills for supported agents, and verify a live search
 - **Interactive REPL** — Run `tvly` with no arguments for a chat-like shell experience
 - **CLI for Humans & AI Agents** — Rich-formatted output for humans, `--json` for agents
 - **Web Search** — LLM-optimized search with domain/date filtering and relevance scoring
@@ -14,6 +15,7 @@ CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, ex
 - **Website Crawling** — Crawl sites with depth/breadth control and path filtering
 - **URL Discovery** — Map all URLs on a site without content extraction
 - **Deep Research** — AI-powered research with citations and structured output
+- **Feedback** — Score search results and share request or session feedback
 - **Self-Update** — Check for and install CLI updates through the original package manager
 
 ## Installation
@@ -29,13 +31,24 @@ curl -fsSL https://raw.githubusercontent.com/tavily-ai/tavily-cli/main/install.s
 On a fresh interactive desktop installation, the installer starts `tvly init`
 to guide authentication, agent detection, skill installation, and verification.
 In CI, SSH/headless, and other non-interactive environments, run `tvly init`
-separately after installation.
+separately with the [appropriate setup options](#non-interactive-mode-for-ai-agents--scripts).
 
 ### Package manager
 
+Choose the package manager you use:
+
 ```bash
+# uv
+uv tool install tavily-cli
+
+# pipx
+pipx install tavily-cli
+
+# pip (inside a virtual environment)
 pip install tavily-cli
 ```
+
+Then run `tvly init` to complete setup.
 
 ### From source
 
@@ -59,26 +72,73 @@ Source and direct-URL installations are detected and must be updated from their 
 
 ## Quick Start
 
-### Keyless mode
+### Initialize Tavily
 
-`tvly search` and `tvly extract` work without an API key — try them right
-after installing. A fair-use rate-limit cap applies; when reached, the CLI
-prints a clear message with sign-up and continuation options. All other
-commands (`crawl`, `map`, `research`, `feedback`) require a key.
+The guided installer starts setup automatically on a fresh interactive desktop
+installation. After a package-manager, source, or non-interactive install, run:
 
 ```bash
-pip install tavily-cli
+tvly init
+tvly search "latest AI trends"
+```
+
+`tvly init` guides you through:
+
+1. **Authentication:** reuse an existing credential or sign in through browser OAuth.
+2. **Agent setup:** detect Claude Code, Codex, and Cursor and install Tavily's eight core agent skills.
+3. **Verification:** check the CLI and installed skills, then run a live search.
+
+No Node.js is required. Restart your agent after new skills are installed.
+
+```bash
+# Set up one or more supported agents
+tvly init --agent codex
+tvly init --agent claude-code --agent cursor
+
+# Set up every detected agent without the agent-selection prompt
+tvly init --all --yes
+
+# Authenticate with an API key instead of OAuth
+tvly init --api-key tvly-YOUR_KEY
+
+# Install skills and verify keyless search if no credential is configured
+tvly init --skip-auth
+
+# Authenticate and verify the CLI without installing agent skills
+tvly init --skip-skills
+```
+
+Skills are installed in `~/.agents/skills` and exposed to the selected agents.
+If no supported agent is detected, setup still installs the shared skills.
+Rerunning `tvly init` checks existing skills and installs the version selected
+by your CLI release. Use `tvly update` followed by `tvly init` to get the
+skills shipped with a newer release.
+
+### Try search and extract without signing in
+
+You can skip setup and run `tvly search` or `tvly extract` immediately after
+installation. When no credential is configured, these commands use keyless
+access with a fair-use rate-limit cap.
+
+```bash
 tvly search "latest AI trends"
 tvly extract https://example.com
 ```
 
-### 1. Authenticate
+If you reach the cap, the CLI prints continuation options. Run `tvly login`
+to authenticate, then retry your command. `crawl`, `map`, `research`, and
+`feedback` require authentication.
+
+### Manage authentication
+
+Use `tvly login` when you only want to manage authentication without running
+the full setup and agent-skill installation:
 
 ```bash
 # Browser OAuth (no Node.js required)
 tvly login
 
-# Headless / SSH: print the URL instead of opening a browser
+# Print the OAuth URL and wait for authorization
 tvly login --no-browser
 
 # Or set API key directly
@@ -89,9 +149,24 @@ export TAVILY_API_KEY=tvly-YOUR_KEY
 
 # Check auth status
 tvly auth
+
+# Revoke stored OAuth tokens and clear saved credentials
+tvly logout
 ```
 
-### 2. Interactive Mode
+`--no-browser` is also available on `tvly init`. It prints the login URL but
+still waits for a callback to `127.0.0.1` on the machine running the CLI.
+For SSH sessions, arrange port forwarding or use an API key; for CI, supply
+`TAVILY_API_KEY` through your secret manager. `tvly logout` cannot unset an
+environment variable, so unset `TAVILY_API_KEY` separately if needed.
+
+For the full API option set, use API-key authentication. Browser OAuth uses
+Tavily's MCP endpoint, where some CLI options and research operations have
+[known compatibility gaps](https://github.com/tavily-ai/tavily-cli/issues/24).
+
+## Examples
+
+### Interactive Mode
 
 ```bash
 # Launch the interactive REPL
@@ -106,7 +181,7 @@ This opens a chat-like shell where you can run commands without the `tvly` prefi
 ❯  help
 ```
 
-### 3. Search the Web
+### Search the Web
 
 ```bash
 # Basic search
@@ -125,7 +200,7 @@ tvly search "AI news" --json
 tvly search "latest AI news" --client-name x
 ```
 
-### 4. Extract Content from URLs
+### Extract Content from URLs
 
 ```bash
 # Extract a single URL
@@ -138,7 +213,7 @@ tvly extract https://example.com https://other.com --query "pricing information"
 tvly extract https://spa-app.com --extract-depth advanced
 ```
 
-### 5. Crawl a Website
+### Crawl a Website
 
 ```bash
 # Basic crawl
@@ -147,14 +222,14 @@ tvly crawl https://docs.example.com
 # Deep crawl with filters
 tvly crawl https://docs.example.com --max-depth 2 --limit 100 --select-paths "/api/.*,/guides/.*"
 
-# Semantic focus
+# Semantic focus with per-page chunks (API-key authentication)
 tvly crawl https://docs.example.com --instructions "Find authentication docs" --chunks-per-source 3
 
 # Save pages as markdown files
 tvly crawl https://docs.example.com --output-dir ./docs
 ```
 
-### 6. Map URLs
+### Map URLs
 
 ```bash
 # Discover all URLs on a site
@@ -164,7 +239,10 @@ tvly map https://example.com
 tvly map https://example.com --select-paths "/blog/.*" --limit 500
 ```
 
-### 7. Deep Research
+### Deep Research
+
+Use API-key authentication for streaming, structured output, and async
+research. Replace `REQUEST_ID` with the ID returned by your research request.
 
 ```bash
 # Run research and wait for results
@@ -178,22 +256,39 @@ tvly research "AI market trends" --stream
 
 # Async: start and poll separately
 tvly research "topic" --no-wait --json        # returns request_id
-tvly research status <request_id> --json      # check status
-tvly research poll <request_id> --json        # wait and get result
+tvly research status REQUEST_ID --json        # check status
+tvly research poll REQUEST_ID --json          # wait and get result
 
 # Structured output
 tvly research "AI market size" --output-schema schema.json --json
 ```
 
-### 8. Submit Feedback
+### Submit Feedback
+
+Replace `REQUEST_ID`, `SESSION_ID`, and the example result IDs with values
+from your requests.
 
 ```bash
 # Score a search request overall and per result
-tvly feedback --request-id <request_id> --agent-score 0.9 \
+tvly feedback --request-id REQUEST_ID --agent-score 0.9 \
   --urls-scores '[{"id": "r1", "agent_score": 0.9}, {"id": "r2", "agent_score": 0.2, "comment": "outdated"}]'
 
 # Feedback on a whole session, with the answer you produced
-tvly feedback --session-id <session_id> --agent-score 1 --response-delivered "..." --used-ids '["r1", "r3"]'
+tvly feedback --session-id SESSION_ID --agent-score 1 --response-delivered "..." --used-ids '["r1", "r3"]'
+```
+
+### Save Results
+
+`--output` writes the structured JSON response, regardless of the filename
+extension. For extraction, `--format markdown` controls the content inside
+that response; it does not turn the output file into plain Markdown.
+
+```bash
+tvly search "AI news" --output results.json
+tvly extract https://example.com --format markdown --output extracted.json
+
+# Save individual crawled pages as Markdown files
+tvly crawl https://docs.example.com --output-dir ./docs
 ```
 
 ## CLI Overview
@@ -201,6 +296,7 @@ tvly feedback --session-id <session_id> --agent-score 1 --response-delivered "..
 ```
 tvly
 ├── (no command)                # Interactive REPL
+├── init                        # Guided auth, agent skills, and verification
 ├── login                       # Authenticate (OAuth or API key)
 ├── logout                      # Clear stored credentials
 ├── auth                        # Check authentication status
@@ -218,7 +314,24 @@ tvly
 
 ## Non-Interactive Mode (for AI Agents & Scripts)
 
-All commands support `--json` output and can be fully controlled via CLI arguments.
+Use `--json` for structured output. For unattended setup, provide a credential
+through `TAVILY_API_KEY` or choose `--skip-auth` for keyless search and extract.
+`--yes` accepts agent selection; it does not complete browser authentication.
+
+```bash
+# With TAVILY_API_KEY already supplied by your environment
+tvly init --all --yes --json
+
+# Keyless setup for Codex when no credential is configured
+tvly init --agent codex --skip-auth --yes --json
+
+# Verify the CLI without installing skills (uses existing credentials, if any)
+tvly init --skip-auth --skip-skills --json
+```
+
+Setup JSON includes `ok`, `mode`, `auth`, `skills`, and `verification`. On
+failure, `error.stage` identifies the failed step. Setup always performs a
+live search, so it needs network access even with `--skip-skills`.
 
 ```bash
 # Every command supports --json for structured output
@@ -233,8 +346,8 @@ echo "Research question" | tvly research - --json
 
 # Async research: launch then poll separately
 tvly research "question" --no-wait --json        # returns request_id
-tvly research status <id> --json                 # check status
-tvly research poll <id> --json                   # wait and get result
+tvly research status REQUEST_ID --json           # check status
+tvly research poll REQUEST_ID --json             # wait and get result
 
 # Global options
 tvly --version         # show version
@@ -249,10 +362,30 @@ tvly --status --json   # structured status
 | 0 | Success |
 | 1 | Local setup or update error |
 | 2 | Invalid input / usage error |
-| 3 | Authentication error |
-| 4 | API or update-check error |
+| 3 | Authentication failure, keyless rate-limit cap, or handled API usage/plan limit |
+| 4 | API error, setup live-search failure, or update-check error |
 
 ## Command Reference
+
+### `tvly init`
+
+Run first-time setup, install or update the Tavily skills selected by your
+CLI release, and verify the CLI with a live search.
+
+| Option | Description |
+|--------|-------------|
+| `--agent` | Install skills for `claude-code`, `codex`, or `cursor`; repeat to select more than one |
+| `--all` | Install skills for every detected agent |
+| `--yes` | Accept detected agents without prompting |
+| `--skip-auth` | Skip login when no credential is configured; existing credentials are still used |
+| `--skip-skills` | Skip agent-skill installation and updates |
+| `--api-key` | Authenticate with an API key instead of OAuth |
+| `--browser` / `--no-browser` | Open OAuth in a browser or print the URL; both require the local callback |
+| `--json` | Return structured setup and verification results |
+
+Use either `--all` or `--agent`. `--skip-auth` and `--api-key` cannot be
+combined. `--json` selects detected agents without prompting, but does not
+skip authentication.
 
 ### `tvly search`
 
@@ -270,6 +403,7 @@ tvly --status --json   # structured status
 | `--include-answer` | Include AI answer (`basic` or `advanced`) |
 | `--include-raw-content` | Include full page (`markdown` or `text`) |
 | `--include-images` | Include image results |
+| `--include-image-descriptions` | Include AI image descriptions |
 | `--chunks-per-source` | Chunks per source (advanced/fast depth only) |
 | `-o` / `--output` | Save output to file |
 | `--client-name` | Set optional `client_name` for request attribution |
@@ -334,6 +468,8 @@ automation can distinguish an available release from a supported self-update.
 | `--instructions` | Natural language guidance |
 | `--select-paths` | Regex patterns for paths to include |
 | `--exclude-paths` | Regex patterns for paths to exclude |
+| `--select-domains` | Regex patterns for domains to include |
+| `--exclude-domains` | Regex patterns for domains to exclude |
 | `--allow-external` | Include external links |
 | `--timeout` | Max wait (10-150 seconds) |
 | `-o` / `--output` | Save output to file |
