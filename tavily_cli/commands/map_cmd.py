@@ -19,7 +19,9 @@ from tavily_cli.common import client_name_option, handle_api_error, json_option
 @click.option("--exclude-domains", default=None, help="Comma-separated regex patterns for domains to exclude.")
 @click.option("--allow-external/--no-external", default=None, help="Include external domain links.")
 @click.option("--timeout", type=float, default=None, help="Max wait time in seconds (10-150).")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@click.option("--output", "-o", "output_file", default=None, help="Save as JSON (.json) or Markdown (.md).")
+@click.option("--save", is_flag=True, default=False, help="Save JSON under .tavily/map/.")
+@click.option("--force", is_flag=True, default=False, help="Overwrite an existing output file.")
 @client_name_option
 @json_option
 def map_urls(
@@ -35,6 +37,8 @@ def map_urls(
     allow_external: bool | None,
     timeout: float | None,
     output_file: str | None,
+    save: bool,
+    force: bool,
     client_name: str | None,
     json_output: bool,
 ) -> None:
@@ -45,7 +49,13 @@ def map_urls(
     Requires a Tavily API key. Sign up at https://tavily.com
     """
     from tavily_cli.config import get_client, require_api_key_friendly
-    from tavily_cli.output import print_map_results
+    from tavily_cli.output import print_map_results, validate_artifact_options
+
+    validate_artifact_options(
+        output_file=output_file,
+        save=save,
+        force=force,
+    )
 
     require_api_key_friendly("map", json_mode=json_output)
     client = get_client(client_name=client_name, json_mode=json_output)
@@ -80,4 +90,10 @@ def map_urls(
     except Exception as e:
         handle_api_error(e, json_output)
 
-    print_map_results(response, json_mode=json_output, output_file=output_file)
+    print_map_results(
+        response,
+        json_mode=json_output,
+        output_file=output_file,
+        save=save,
+        force=force,
+    )
