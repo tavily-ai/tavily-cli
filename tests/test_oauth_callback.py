@@ -51,4 +51,3 @@ def test_callback_keeps_authentication_material_off_the_page(monkeypatch, outcom
         assert private_value not in response.text
     assert "You're signed in" not in response.text
     assert 'referrerpolicy="no-referrer"' in response.text
-
