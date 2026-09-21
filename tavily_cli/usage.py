@@ -6,8 +6,8 @@ from typing import Any
 
 import httpx
 
+from tavily_cli import config
 from tavily_cli.common import TavilyAPIError, sanitize_control
-from tavily_cli.config import credential_mode, get_api_base_url
 
 USAGE_API_KEY_HINT = (
     "Usage reporting requires an API key; browser (OAuth) sessions cannot query credits. "
@@ -23,11 +23,12 @@ class UsageError(TavilyAPIError):
 
 def fetch_usage(api_key: str, *, timeout: float = 10.0) -> dict[str, Any]:
     """Fetch /usage without sending MCP OAuth credentials to the API."""
-    if credential_mode(api_key) != "api_key":
+    if config.credential_mode(api_key) != "api_key":
         raise UsageError(USAGE_API_KEY_HINT)
+    base_url = config.get_api_base_url() or "https://api.tavily.com"
     try:
         response = httpx.get(
-            f"{get_api_base_url().rstrip('/')}/usage",
+            f"{base_url.rstrip('/')}/usage",
             headers={"Authorization": f"Bearer {api_key}", "X-Client-Source": "tavily-cli"},
             timeout=timeout,
         )

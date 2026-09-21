@@ -48,6 +48,14 @@ def test_usage_human_shows_plan_key_and_paygo(usage_api):
         assert text in result.stdout
 
 
+@pytest.mark.parametrize(("base_url", "expected"), [(None, "https://api.tavily.com/usage"), ("https://custom.test/", "https://custom.test/usage")])
+def test_usage_resolves_default_and_overridden_api_urls(monkeypatch, usage_api, base_url, expected):
+    monkeypatch.setattr(config, "get_api_base_url", lambda: base_url)
+    result = CliRunner().invoke(cli, ["usage", "--json"])
+    assert result.exit_code == 0
+    assert usage_api[0][0] == expected
+
+
 @pytest.mark.parametrize(("key", "mode"), [(None, "keyless"), ("oauth-token", "oauth")])
 def test_usage_never_sends_keyless_or_oauth_credentials(monkeypatch, key, mode):
     monkeypatch.setattr(config, "get_api_key", lambda: key)
@@ -126,3 +134,13 @@ def test_oauth_status_explains_why_usage_is_unavailable(monkeypatch):
     assert payload["mode"] == "oauth"
     assert payload["usage"] is None
     assert "API key" in payload["usage_unavailable_reason"]
+
+
+def test_auth_remains_an_auth_only_check(monkeypatch):
+    from tavily_cli.commands import auth
+
+    monkeypatch.setattr(auth, "get_api_key", lambda: "tvly-test-secret")
+    monkeypatch.setattr(httpx, "get", lambda *a, **kw: pytest.fail("auth must not fetch usage"))
+    result = CliRunner().invoke(cli, ["auth", "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["mode"] == "api_key"
