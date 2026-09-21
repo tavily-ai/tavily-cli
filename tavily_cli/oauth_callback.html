@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <title>$title · Tavily CLI</title>
+  <style>
+    :root { color-scheme: dark; --bg: #111115; --surface: #1d1d23; --text: #f5f5f7;
+      --muted: #b8b8c2; --line: #3e3e48; --aqua: #5cd9e6; --green: #9bc0ae; --pink: #faa2fb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+      padding: 1.5rem; background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; }
+    main { width: 100%; max-width: 36rem; padding: 2.5rem; background: var(--surface);
+      border: 1px solid var(--line); border-radius: 0.75rem; }
+    .brand { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 2.5rem; }
+    .wordmark { font-size: 2rem; font-weight: 750; letter-spacing: -0.08rem; }
+    .badge { color: var(--muted); border: 1px solid var(--line); border-radius: 0.25rem;
+      padding: 0.125rem 0.5rem; font-size: 0.75rem; letter-spacing: 0.075rem; }
+    .colors { display: flex; height: 0.25rem; width: 4rem; margin-top: 0.25rem; }
+    .colors i { flex: 1; background: var(--aqua); }
+    .colors i:nth-child(2) { background: var(--pink); }
+    .colors i:nth-child(3) { background: #ffc769; }
+    .colors i:nth-child(4) { background: #8385f9; }
+    .colors i:nth-child(5) { background: var(--green); }
+    .status { color: var(--green); font-size: 0.875rem; font-weight: 600; margin: 0 0 0.5rem; }
+    .error .status { color: var(--pink); }
+    h1 { font-size: clamp(1.75rem, 5vw, 2rem); line-height: 1.25; letter-spacing: -0.04rem; margin: 0 0 1rem; }
+    .message { color: var(--muted); margin: 0 0 2rem; }
+    .next { font-size: 0.875rem; color: var(--muted); margin: 0 0 0.5rem; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line);
+      border-radius: 0.375rem; padding: 1rem; margin: 0 0 2rem; line-height: 1.75; }
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.875rem; color: var(--aqua); }
+    footer { padding-top: 1.5rem; border-top: 1px solid var(--line); }
+    a { display: inline-block; color: var(--aqua); text-underline-offset: 0.25rem; padding: 0.25rem 0; }
+    a:focus-visible { outline: 2px solid var(--aqua); outline-offset: 0.375rem; border-radius: 0.125rem; }
+    @media (max-width: 400px) { body { padding: 1rem; } main { padding: 1.5rem; } }
+  </style>
+</head>
+<body>
+  <main class="$state" aria-labelledby="page-title">
+    <header class="brand" aria-label="Tavily CLI">
+      <div><span class="wordmark">tavily</span><span class="colors" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></div>
+      <span class="badge">CLI</span>
+    </header>
+    <p class="status">$label</p>
+    <h1 id="page-title">$title</h1>
+    <p class="message">$message</p>
+    <p class="next">$next_step</p>
+    <pre><code>$command</code></pre>
+    <footer><a href="https://app.tavily.com/" rel="noreferrer" referrerpolicy="no-referrer">Open Tavily dashboard</a></footer>
+  </main>
+</body>
+</html>
