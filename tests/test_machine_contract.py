@@ -256,7 +256,11 @@ def test_keyless_limit_uses_stable_error_fields(monkeypatch: pytest.MonkeyPatch)
     result = CliRunner().invoke(cli, ["search", "topic", "--json"])
 
     assert result.exit_code == 3
-    assert json.loads(result.stdout) == {
+    payload = json.loads(result.stdout)
+    actions = payload["error"].pop("next_actions")
+    assert {"action": "login"} in actions
+    assert any(action.get("command") == "tvly login" for action in actions)
+    assert payload == {
         "ok": False,
         "error": {
             "code": "daily_cap_reached",
@@ -265,7 +269,6 @@ def test_keyless_limit_uses_stable_error_fields(monkeypatch: pytest.MonkeyPatch)
             "retryable": True,
             "window": "day",
             "retry_after_seconds": 60,
-            "next_actions": [{"action": "login"}],
         },
     }
 

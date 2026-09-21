@@ -130,7 +130,8 @@ def _print_status(json_output: bool) -> None:
     import json
 
     from tavily_cli.common import handle_oauth_refresh_error
-    from tavily_cli.config import get_api_key
+    from tavily_cli.config import credential_mode, get_api_key
+    from tavily_cli.keyless import KEYLESS_NOTICE
     from tavily_cli.oauth import OAuthError
 
     try:
@@ -143,7 +144,9 @@ def _print_status(json_output: bool) -> None:
         click.echo(json.dumps({
             "version": __version__,
             "authenticated": authenticated,
-        }))
+            "mode": credential_mode(key),
+            "source": _auth_source(key) if key else None,
+        }, indent=2))
     else:
         from rich.console import Console
         console = Console()
@@ -153,13 +156,21 @@ def _print_status(json_output: bool) -> None:
             source = _auth_source(key)
             console.print(f"  [#9BC0AE]>[/#9BC0AE] Authenticated via {source}")
         else:
-            console.print("  [#FAA2FB]>[/#FAA2FB] Not authenticated")
-            console.print("    Run: tvly login")
+            console.print(f"  {KEYLESS_NOTICE}")
+
+
+@click.command("status")
+@click.option("--json", "json_output", is_flag=True, help="Output as JSON.")
+@click.pass_context
+def status_command(ctx: click.Context, json_output: bool) -> None:
+    """Show version and authentication mode (alias for --status)."""
+    _print_status(json_output or (ctx.obj or {}).get("json_output", False))
 
 
 cli.add_command(login)
 cli.add_command(logout)
 cli.add_command(auth_status)
+cli.add_command(status_command)
 cli.add_command(init_command)
 cli.add_command(search)
 cli.add_command(extract)

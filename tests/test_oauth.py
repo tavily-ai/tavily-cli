@@ -528,6 +528,7 @@ def test_logout_json_reports_remaining_environment_credential(monkeypatch: pytes
     assert "tvly-environment-secret" not in logout_result.output
     assert json.loads(auth_result.output) == {
         "authenticated": True,
+        "mode": "api_key",
         "method": "env",
         "source": "TAVILY_API_KEY environment variable",
     }

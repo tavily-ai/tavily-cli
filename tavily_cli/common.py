@@ -10,7 +10,7 @@ from typing import Any
 import click
 from tavily import TavilyKeylessLimitError
 
-from tavily_cli.keyless import format_keyless_envelope_for_terminal
+from tavily_cli.keyless import cli_limit_message, cli_next_actions, format_keyless_envelope_for_terminal
 
 # C0/C1 control and escape bytes, minus tab (\x09), newline (\x0a), and
 # carriage return (\x0d). Stripping these from server- and web-derived text
@@ -92,12 +92,12 @@ def handle_keyless_cap_hit(e: TavilyKeylessLimitError, json_mode: bool) -> None:
     if json_mode:
         emit_error(
             e.code,
-            e.message,
+            cli_limit_message(e.message),
             stage="request",
             retryable=e.retry_after_seconds is not None,
             window=e.window,
             retry_after_seconds=e.retry_after_seconds,
-            next_actions=e.next_actions,
+            next_actions=cli_next_actions(e.next_actions),
         )
         raise SystemExit(3)
 
@@ -115,7 +115,7 @@ def handle_keyless_cap_hit(e: TavilyKeylessLimitError, json_mode: bool) -> None:
         elif not line:
             err_console.print()
         else:
-            err_console.print(f"    {line}", markup=False, highlight=False)
+            err_console.print(f"    {sanitize_control(line)}", markup=False, highlight=False)
     err_console.print()
     err_console.print(
         "  [dim]Run [/dim][#9BC0AE]tvly login[/#9BC0AE][dim] to authenticate "

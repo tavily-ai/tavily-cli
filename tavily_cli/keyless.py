@@ -2,7 +2,34 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+SIGNUP_URL = "https://app.tavily.com/?utm_source=tavily-cli&utm_medium=cli"
+KEYLESS_NOTICE = "Keyless: search and extract only, subject to rate-limit caps. Run tvly login to authenticate."
+
+
+def cli_next_actions(next_actions: list[Any] | None) -> list[dict[str, Any]]:
+    """Replace API-only upgrade instructions with actions a CLI caller can use."""
+    actions = [
+        dict(action) for action in (next_actions or [])
+        if isinstance(action, dict) and action.get("type") not in ("signup", "agentic_payment", "login")
+    ]
+    return [
+        {"type": "login", "command": "tvly login", "instructions": "Sign in through your browser."},
+        {
+            "type": "signup", "url": SIGNUP_URL,
+            "command": "tvly login --api-key tvly-YOUR_KEY",
+            "instructions": "Create an API key in the dashboard, then run the command for full CLI option support.",
+        },
+        *actions,
+    ]
+
+
+def cli_limit_message(message: str | None) -> str:
+    """Keep the allowance explanation, without HTTP-header retry instructions."""
+    sentences = re.split(r"(?<=[.!?])\s+|\n+", message or "")
+    return " ".join(s for s in sentences if "retry-after" not in s.lower()).strip() or "Keyless allowance reached."
 
 
 def _format_seconds(seconds: int) -> str:
@@ -10,7 +37,8 @@ def _format_seconds(seconds: int) -> str:
     if seconds < 60:
         return f"{seconds}s"
     if seconds < 3600:
-        return f"{seconds // 60}m {seconds % 60}s".rstrip(" 0s") or f"{seconds // 60}m"
+        minutes, remainder = divmod(seconds, 60)
+        return f"{minutes}m {remainder}s" if remainder else f"{minutes}m"
     if seconds < 86400:
         hours = seconds // 3600
         minutes = (seconds % 3600) // 60
@@ -30,16 +58,15 @@ def format_keyless_envelope_for_terminal(
     lines: list[str] = []
     lines.append("Tavily rate limit reached.")
 
-    if isinstance(message, str) and message.strip():
-        lines.append(message.strip())
+    lines.append(cli_limit_message(message))
 
     if isinstance(retry_after_seconds, int) and retry_after_seconds > 0:
         lines.append("")
-        lines.append(f"Retry after: {_format_seconds(retry_after_seconds)} ({retry_after_seconds}s)")
+        lines.append(f"Retry after: {_format_seconds(retry_after_seconds)}")
 
+    next_actions = cli_next_actions(next_actions)
     if isinstance(next_actions, list) and next_actions:
         signup_action = None
-        payment_action = None
         bonus_action = None
         for action in next_actions:
             if not isinstance(action, dict):
@@ -47,23 +74,17 @@ def format_keyless_envelope_for_terminal(
             action_type = action.get("type")
             if action_type == "signup":
                 signup_action = action
-            elif action_type == "agentic_payment":
-                payment_action = action
             elif action_type == "bonus_credits" and action.get("eligible"):
                 bonus_action = action
 
-        if signup_action or payment_action or bonus_action:
+        if signup_action or bonus_action:
             lines.append("")
             lines.append("Continuation options:")
 
             if signup_action:
-                url = signup_action.get("url") or "https://tavily.com"
+                url = signup_action["url"]
                 lines.append(f"  - Sign up for a Tavily API key:  {url}")
-
-            if payment_action:
-                scheme = payment_action.get("scheme") or "x402"
-                details = payment_action.get("details") or "TBD"
-                lines.append(f"  - Pay via {scheme} agentic payment:  {details}")
+                lines.append("    Then run: tvly login --api-key tvly-YOUR_KEY")
 
             if bonus_action:
                 questions = bonus_action.get("questions") or []

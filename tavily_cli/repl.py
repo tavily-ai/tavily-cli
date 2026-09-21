@@ -34,8 +34,8 @@ def _print_banner() -> None:
         source = _auth_source(key)
         err_console.print(f"  [#9BC0AE]>[/#9BC0AE] Authenticated via {source}")
     else:
-        err_console.print("  [#FAA2FB]>[/#FAA2FB] Not authenticated")
-        err_console.print("    [dim]search and extract work without a key (with a rate-limit cap).[/dim]")
+        from tavily_cli.keyless import KEYLESS_NOTICE
+        err_console.print(f"  {KEYLESS_NOTICE}")
         err_console.print("    Type [#9BC0AE]init[/#9BC0AE] for guided setup and skill installation.")
         err_console.print("    Type [#9BC0AE]login[/#9BC0AE] for browser authentication only.")
 
