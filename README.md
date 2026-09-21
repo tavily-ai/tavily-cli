@@ -193,6 +193,8 @@ tvly
 ├── login                       # Authenticate (OAuth or API key)
 ├── logout                      # Clear stored credentials
 ├── auth                        # Check authentication status
+├── status                      # Version, auth mode and API-key plan usage
+├── usage                       # API-key, plan and PAYGO credit usage
 ├── search <query>              # Web search
 ├── extract <urls...>           # Extract content from URLs
 ├── crawl <url>                 # Crawl a website
@@ -243,8 +245,10 @@ tvly research poll <id> --json                   # wait and get result
 
 # Global options
 tvly --version         # show version
-tvly --status          # show version + auth status
+tvly --status          # show version, auth mode and API-key plan usage
 tvly --status --json   # structured status
+tvly status --json     # equivalent status command
+tvly usage --json      # full credit usage (API-key authentication)
 ```
 
 `-o` writes Markdown for `.md`/`.markdown` paths and JSON otherwise. `--json`
@@ -269,6 +273,40 @@ diagnostics remain on stderr:
 
 `--json` emits one JSON document. `--jsonl` emits typed result records followed
 by a summary record; with research streaming, each API event is one line.
+Normal result JSON, status and usage output are already indented; no `--pretty`
+flag is needed. JSONL records and machine-readable errors remain compact.
+
+### Keyless mode and credit usage
+
+`tvly auth`, `tvly status` and `tvly --status` explicitly report `keyless` when no
+credential is configured. Search and extract still work, subject to rate-limit
+caps. JSON keeps `authenticated: false` and adds `mode`, which is one of
+`keyless`, `api_key` or `oauth`. A failed OAuth refresh remains an error rather
+than silently switching to keyless access.
+
+When a keyless cap is reached, the CLI shows the retry delay once and gives
+CLI-native actions: `tvly login` for browser sign-in, or create an API key at
+the dashboard and run `tvly login --api-key tvly-YOUR_KEY` for full option
+support. Signup links use `utm_source=tavily-cli&utm_medium=cli`. Unavailable
+x402 payment instructions are omitted. JSON and JSONL preserve the cap code,
+window, retry delay and bonus-credit details alongside the CLI actions.
+
+`tvly usage` shows API-key, plan and PAYGO credits; `tvly usage --json` returns
+the [Usage API response](https://docs.tavily.com/documentation/api-reference/endpoint/usage).
+It requires an API key. Keyless and browser OAuth sessions receive an actionable
+authentication error without a usage request. Missing usage values are displayed
+as `not reported`, never as zero.
+
+With API-key auth, both status forms also request a plan summary with a
+five-second network timeout. If this lookup fails, status still exits successfully
+and reports the auth state plus `usage: null` and `usage_error` in JSON (a warning
+on stderr in human mode). Run `tvly usage` to check usage explicitly with a
+nonzero exit on failure. `tvly auth` remains the auth-only check. OAuth/keyless
+status explains why account usage is unavailable.
+
+The browser callback page offers a next-step command and a dashboard link.
+The terminal confirms sign-in after token exchange completes. The page loads
+no external assets and does not send callback URLs as referrers.
 
 ### Exit Codes
 
