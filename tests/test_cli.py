@@ -66,11 +66,12 @@ def test_repl_help_lists_init_and_update(monkeypatch: pytest.MonkeyPatch) -> Non
     assert "Check for or install the latest Tavily CLI release" in rendered
 
 
-def test_repl_banner_promotes_init_and_browser_login(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_repl_startup_promotes_init_and_browser_login(monkeypatch: pytest.MonkeyPatch) -> None:
     output = StringIO()
     monkeypatch.setattr(repl, "err_console", Console(file=output, force_terminal=False, width=120))
+    monkeypatch.setattr(repl, "_prompt", lambda: "exit")
 
-    repl._print_banner()
+    repl.run_repl()
 
     rendered = output.getvalue()
     assert "First-time setup: tvly init" in rendered

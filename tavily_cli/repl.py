@@ -8,20 +8,14 @@ import shlex
 import click
 from rich.console import Console
 
-from tavily_cli.help import print_overview
-
 err_console = Console(stderr=True)
 
 
-def _print_banner() -> None:
-    """Show the same command guide as the root CLI, without auth side effects."""
-    from tavily_cli.cli import cli
-    with click.Context(cli, info_name="tvly") as ctx:
-        print_overview(err_console, ctx, shell=True)
-
-
 def _print_help() -> None:
-    _print_banner()
+    """Show the same command guide as the root CLI, without auth side effects."""
+    from tavily_cli.cli import _print_welcome, cli
+    with click.Context(cli, info_name="tvly") as ctx:
+        _print_welcome(err_console, ctx, shell=True)
 
 
 def _prompt() -> str:
@@ -41,7 +35,7 @@ def run_repl() -> None:
     """Enter the interactive REPL loop."""
     err_console.print()
 
-    _print_banner()
+    _print_help()
 
     while True:
         try:
