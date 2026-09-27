@@ -10,7 +10,7 @@ from rich.table import Table
 from rich.text import Text
 
 from tavily_cli import __version__
-from tavily_cli.theme import ACCENT, BRAND
+from tavily_cli.theme import ACCENT, BRAND, LOGO
 
 _TOOL_USAGE = {
     "search": 'search "query"',
@@ -47,9 +47,8 @@ def print_overview(console: Console, ctx: click.Context, *, shell: bool = False)
     group = ctx.command
     assert isinstance(group, click.Group)
     console.print()
-    brand = Text("  tvly", style=f"bold {BRAND}")
-    brand.append(f"  Tavily CLI  v{__version__}", style="dim")
-    console.print(brand)
+    console.print(LOGO, highlight=False)
+    console.print(Text(f"  Tavily CLI  v{__version__}", style="dim"))
     console.print(Text("  Search the web. Read pages. Research anything.", style="dim"))
     console.print()
     console.print(Text("  Usage: tvly [OPTIONS] COMMAND [ARGS]..."))
