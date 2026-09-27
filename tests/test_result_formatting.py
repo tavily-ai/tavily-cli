@@ -125,3 +125,13 @@ def test_research_receipts_are_readable_and_json_stays_raw(monkeypatch, args):
     assert machine.exit_code == 0, machine.output
     assert json.loads(machine.stdout) == response
     assert machine.stderr == ""
+
+
+@pytest.mark.parametrize("formatter", FORMATTERS)
+def test_long_urls_wrap_without_losing_characters(monkeypatch, formatter):
+    url = "https://example.com/very/long/path/to/a/document?query=complete#section"
+    data = {"status": "completed", "results": [{"title": "A", "url": url}], "sources": [{"url": url}]}
+    if formatter is output.print_map_results:
+        data["results"] = [url]
+    rendered = render(monkeypatch, formatter, data, width=40)
+    assert url in "".join(rendered.split())

@@ -55,7 +55,7 @@ def _safe_link(url: Any, label: Any | None = None, *, style: str = "") -> Text:
     """
     clean_url = sanitize_control(url)
     display = sanitize_control(label) if label is not None else clean_url
-    text = Text(display, style=style)
+    text = Text(display, style=style, overflow="fold")
     try:
         scheme = urlparse(clean_url).scheme
     except ValueError:
