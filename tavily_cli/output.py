@@ -11,10 +11,13 @@ and rendered via ``Text``/validated links rather than markup-bearing f-strings.
 from __future__ import annotations
 
 import json
+from html import unescape
+from textwrap import shorten
 from typing import Any
 from urllib.parse import urlparse
 
 import click
+from markdown_it import MarkdownIt
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.rule import Rule
@@ -26,6 +29,7 @@ from tavily_cli.common import sanitize_control
 
 console = Console()
 err_console = Console(stderr=True)
+_preview_markdown = MarkdownIt("commonmark")
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +116,25 @@ def emit(data: Any, *, json_mode: bool, output_file: str | None = None, pretty: 
 # Search
 # ---------------------------------------------------------------------------
 
+def _search_preview(content: str) -> str:
+    """Flatten Markdown into a compact preview, keeping the source's wording."""
+    parts = []
+    for token in _preview_markdown.parse(sanitize_control(content)):
+        if token.type == "inline":
+            for child in token.children or []:
+                if child.type in {"softbreak", "hardbreak"}:
+                    parts.append(" ")
+                elif child.type == "html_inline" and child.content.lower().startswith(("<br>", "<br/", "<br ")):
+                    parts.append(" ")
+                elif child.type in {"text", "code_inline", "image"}:
+                    parts.append(child.content)
+            parts.append(" ")
+        elif token.type in {"fence", "code_block", "html_block"}:
+            parts.extend((token.content, " "))
+    # Markdown entity decoding can introduce control characters: sanitize again.
+    return shorten(sanitize_control("".join(parts)), width=360, placeholder="…")
+
+
 def print_search_results(data: dict, *, json_mode: bool, output_file: str | None = None) -> None:
     if json_mode:
         emit(data, json_mode=True, output_file=output_file, pretty=True)
@@ -136,33 +159,37 @@ def print_search_results(data: dict, *, json_mode: bool, output_file: str | None
         console.print("[dim]No results found.[/dim]")
         return
 
+    width = min(console.width, 100)
     for i, r in enumerate(results, 1):
-        title = r.get("title", "Untitled")
+        title = sanitize_control(r.get("title") or "Untitled")
         url = r.get("url", "")
         content = r.get("content", "")
         score = r.get("score")
 
         header = Text()
-        header.append(f"{i}. ", style="bold #8385F9")
-        header.append(sanitize_control(title), style="bold")
-        header.append("  ")
-        header.append_text(_score_label(score))
-        console.print(header)
+        header.append(" ".join(sanitize_control(unescape(title)).split()), style="bold")
+        if score is not None:
+            header.append("  ")
+            header.append_text(_score_label(score))
 
-        domain_line = Text("   ")
-        domain_line.append_text(_safe_link(url, _domain(url), style="#FAA2FB"))
-        console.print(domain_line)
+        result = Table.grid(padding=(0, 1), expand=True)
+        result.add_column(width=len(str(len(results))) + 1, style="bold #8385F9")
+        result.add_column(ratio=1)
+        result.add_row(Text(f"{i}."), header)
+        if url:
+            result.add_row("", _safe_link(url, style="#FAA2FB"))
 
         if content:
-            snippet = content[:300]
-            if len(content) > 300:
-                snippet += "..."
-            snippet_line = Text("   ")
-            snippet_line.append(sanitize_control(snippet), style="dim")
-            console.print(snippet_line)
+            preview = _search_preview(content)
+            if preview:
+                result.add_row("", _safe_text(preview, style="dim"))
+        console.print(result, width=width)
         console.print()
 
-    _footer("Search", len(results), "results", response_time)
+    summary = f"{len(results)} result{'s' if len(results) != 1 else ''}"
+    if response_time is not None:
+        summary += f" · {response_time:.2f}s"
+    console.print(Text(summary, style="dim"), width=width)
 
     images = data.get("images")
     if images:
