@@ -245,6 +245,8 @@ def print_extract_results(data: dict, *, json_mode: bool, output_file: str | Non
         preview = raw[:3000]
         if len(raw) > 3000:
             preview = preview.rsplit(" ", 1)[0] + "…"
+        if preview.startswith("# "):
+            preview = preview.partition("\n")[2].lstrip()
         _item(
             index, len(results), _page_title(page, index), page.get("url") or "",
             meta=f"{len(raw):,} characters" + (" · preview" if len(raw) > 3000 else ""),
@@ -285,7 +287,7 @@ def print_crawl_results(
         _item(
             index, len(results), _page_title(page, index), page.get("url") or "",
             meta=f"{len(raw):,} characters",
-            body=_safe_text(_search_preview(raw) if raw else "No content returned.", style="dim"),
+            body=_safe_text(_search_preview(raw) if raw else "No content returned."),
         )
     _failures(data.get("failed_results") or [])
     _footer("Crawl", len(results), "page" if len(results) == 1 else "pages", data.get("response_time"))
@@ -381,7 +383,7 @@ def print_research_result(data: dict, *, json_mode: bool, output_file: str | Non
         console.print(Text("No report content returned.", style="dim"))
     console.print()
     if sources:
-        _heading("Sources")
+        _heading("Source details")
         for index, source in enumerate(sources, 1):
             if isinstance(source, dict):
                 title = source.get("title") or f"Source {index}"
