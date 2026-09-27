@@ -183,11 +183,6 @@ This opens a chat-like shell where you can run commands without the `tvly` prefi
 
 ### Search the Web
 
-Terminal results show full source links and compact, consistently indented
-previews. Markdown formatting and excess whitespace are removed from previews;
-long previews end at a word boundary. Use `--json` or `-o results.json` for the
-complete, unchanged Tavily response.
-
 ```bash
 # Basic search
 tvly search "latest AI trends"
