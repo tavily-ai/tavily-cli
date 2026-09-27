@@ -14,9 +14,10 @@ from tavily_cli.commands.map_cmd import map_urls
 from tavily_cli.commands.research import research
 from tavily_cli.commands.search import search
 from tavily_cli.commands.update import update_command
+from tavily_cli.help import TavilyGroup
 
 
-@click.group(invoke_without_command=True)
+@click.group(cls=TavilyGroup, invoke_without_command=True, context_settings={"help_option_names": ["-h", "--help"]})
 @click.option("--version", is_flag=True, default=False, help="Show version and exit.")
 @click.option("--status", "show_status", is_flag=True, default=False, help="Show version and auth status.")
 @click.option("--json", "json_output", is_flag=True, default=False, help="Output as JSON (for agents and scripts).")
@@ -50,67 +51,22 @@ def cli(ctx: click.Context, version: bool, show_status: bool, json_output: bool)
         return
 
     if ctx.invoked_subcommand is None:
-        from tavily_cli.repl import run_repl
-        run_repl()
+        if json_output:
+            import json
+            click.echo(json.dumps({"version": __version__, "commands": cli.list_commands(ctx)}))
+        else:
+            click.echo(ctx.get_help(), color=ctx.color)
         ctx.exit(0)
 
 
-def _print_welcome() -> None:
-    """Show a branded welcome screen with quick-start hints."""
-    from rich.console import Console
-    from rich.text import Text
-
-    from tavily_cli.common import handle_oauth_refresh_error
-    from tavily_cli.config import get_api_key
-    from tavily_cli.oauth import OAuthError
-    from tavily_cli.theme import LOGO
-
-    console = Console(stderr=True)
-    try:
-        key = get_api_key()
-    except OAuthError as e:
-        handle_oauth_refresh_error(e, False)
-
-    # Logo + version
-    console.print()
-    console.print(LOGO)
-    console.print(f"  [dim]v{__version__}[/dim]")
-    console.print()
-
-    # Auth status
-    if key:
-        source = _auth_source(key)
-        console.print(f"  [#9BC0AE]>[/#9BC0AE] Authenticated via {source}")
-    else:
-        console.print("  [#FAA2FB]>[/#FAA2FB] Not authenticated")
-        console.print("    [dim]search and extract work without a key (with a rate-limit cap).[/dim]")
-        console.print("    [dim]Run:[/dim] tvly login [dim]to remove the cap.[/dim]")
-
-    console.print()
-
-    # Quick-start commands
-    commands = Text()
-    commands.append("  Commands\n\n", style="bold")
-    commands.append("    tvly search ", style="#9BC0AE")
-    commands.append('"your query"', style="dim")
-    commands.append("            Web search\n")
-    commands.append("    tvly extract ", style="#9BC0AE")
-    commands.append("<url>", style="dim")
-    commands.append("                  Extract content\n")
-    commands.append("    tvly crawl ", style="#9BC0AE")
-    commands.append("<url>", style="dim")
-    commands.append("                    Crawl a website\n")
-    commands.append("    tvly map ", style="#9BC0AE")
-    commands.append("<url>", style="dim")
-    commands.append("                      Discover URLs\n")
-    commands.append("    tvly research ", style="#9BC0AE")
-    commands.append('"your query"', style="dim")
-    commands.append("          Deep research\n")
-
-    console.print(commands)
-    console.print("  [dim]Add --json to any command for machine-readable output.[/dim]")
-    console.print("  [dim]Add --help to any command for full options.[/dim]")
-    console.print()
+@click.command("shell")
+@click.pass_context
+def shell_command(ctx: click.Context) -> None:
+    """Open the interactive command shell."""
+    if (ctx.obj or {}).get("json_output"):
+        raise click.UsageError("The interactive shell does not support --json. Run a tool command instead.")
+    from tavily_cli.repl import run_repl
+    run_repl()
 
 
 def _auth_source(key: str) -> str:
@@ -158,6 +114,7 @@ def _print_status(json_output: bool) -> None:
             console.print("    Run: tvly login")
 
 
+cli.add_command(shell_command)
 cli.add_command(login)
 cli.add_command(logout)
 cli.add_command(auth_status)
