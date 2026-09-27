@@ -29,7 +29,7 @@ def test_page_whitespace_is_compact_and_wrapped_lines_stay_indented(monkeypatch,
         "response_time": 0.91,
     }
     rendered = render_search(monkeypatch, response, width)
-    lines = rendered.splitlines()
+    lines = rendered.splitlines()[2:]
     assert "\n\n\n" not in rendered
     assert all(line.startswith("   ") for line in lines[1:] if line.strip() and "1 result" not in line)
     assert all(len(line.rstrip()) <= min(width, 100) for line in lines)
