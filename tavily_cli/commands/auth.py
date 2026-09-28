@@ -139,12 +139,14 @@ def _print_login_success(method: str, detail: str, *, json_mode: bool) -> None:
 
 def _print_login_failure(message: str, *, json_mode: bool) -> None:
     if json_mode:
-        import json as json_mod
+        from tavily_cli.common import emit_error
 
-        click.echo(json_mod.dumps({
-            "authenticated": False,
-            "error": message,
-        }))
+        emit_error(
+            "authentication_failed",
+            message,
+            stage="auth",
+            retryable=False,
+        )
         return
 
     from rich.markup import escape
@@ -212,8 +214,15 @@ def logout(ctx: click.Context, json_flag: bool) -> None:
         if json_mode:
             import json as json_mod
 
+            from tavily_cli.common import error_payload
+
             payload["server_revoked"] = False
-            payload["error"] = result.revocation_error
+            payload.update(error_payload(
+                "oauth_revocation_failed",
+                result.revocation_error,
+                stage="auth",
+                retryable=True,
+            ))
             click.echo(json_mod.dumps(payload))
         else:
             from rich.markup import escape
@@ -258,6 +267,8 @@ def auth_status(ctx: click.Context, json_flag: bool) -> None:
     """Check authentication status."""
     import json as json_mod
 
+    from tavily_cli.config import credential_mode
+    from tavily_cli.keyless import KEYLESS_NOTICE
     from tavily_cli.theme import console
 
     json_mode = json_flag
@@ -276,9 +287,10 @@ def auth_status(ctx: click.Context, json_flag: bool) -> None:
     if json_mode:
         click.echo(json_mod.dumps({
             "authenticated": key is not None,
+            "mode": credential_mode(key),
             "method": method,
             "source": source,
-        }))
+        }, indent=2))
     else:
         console.print()
         if key:
@@ -286,7 +298,5 @@ def auth_status(ctx: click.Context, json_flag: bool) -> None:
             console.print(f"  [#9BC0AE]>[/#9BC0AE] Authenticated via {source}")
             console.print(f"    [dim]Key: {masked}[/dim]")
         else:
-            console.print("  [#FAA2FB]>[/#FAA2FB] Not authenticated")
-            console.print()
-            console.print("  Run [#9BC0AE]tvly login[/#9BC0AE] to authenticate.")
+            console.print(f"  {KEYLESS_NOTICE}")
         console.print()

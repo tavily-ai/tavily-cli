@@ -25,6 +25,7 @@ from tavily_cli.common import client_name_option, handle_api_error, json_option
 @click.option("--timeout", type=float, default=None, help="Max wait time in seconds (10-150).")
 @click.option("--output", "-o", "output_file", default=None, help="Save JSON output to file.")
 @click.option("--output-dir", default=None, help="Save each page as a .md file in this directory.")
+@click.option("--jsonl", is_flag=True, default=False, help="Output one crawled page per JSON line.")
 @client_name_option
 @json_option
 def crawl(
@@ -45,6 +46,7 @@ def crawl(
     timeout: float | None,
     output_file: str | None,
     output_dir: str | None,
+    jsonl: bool,
     client_name: str | None,
     json_output: bool,
 ) -> None:
@@ -57,8 +59,14 @@ def crawl(
     from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import print_crawl_results
 
-    require_api_key_friendly("crawl", json_mode=json_output)
-    client = get_client(client_name=client_name, json_mode=json_output)
+    if json_output and jsonl:
+        raise click.UsageError("Use either --json or --jsonl, not both.")
+    if jsonl and output_dir:
+        raise click.UsageError("--jsonl cannot be combined with --output-dir; use --output FILE.jsonl.")
+    machine_mode = json_output or jsonl
+
+    require_api_key_friendly("crawl", json_mode=machine_mode)
+    client = get_client(client_name=client_name, json_mode=machine_mode)
 
     kwargs: dict = {"url": url}
     if max_depth is not None:
@@ -93,9 +101,15 @@ def crawl(
     from tavily_cli.theme import spinner
 
     try:
-        with spinner(f"Crawling {url}...", json_mode=json_output):
+        with spinner(f"Crawling {url}...", json_mode=machine_mode):
             response = client.crawl(**kwargs)
     except Exception as e:
-        handle_api_error(e, json_output)
+        handle_api_error(e, machine_mode)
 
-    print_crawl_results(response, json_mode=json_output, output_file=output_file, output_dir=output_dir)
+    print_crawl_results(
+        response,
+        json_mode=json_output,
+        jsonl_mode=jsonl,
+        output_file=output_file,
+        output_dir=output_dir,
+    )

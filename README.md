@@ -193,6 +193,8 @@ tvly
 ├── login                       # Authenticate (OAuth or API key)
 ├── logout                      # Clear stored credentials
 ├── auth                        # Check authentication status
+├── status                      # Version, auth mode and API-key plan usage
+├── usage                       # API-key, plan and PAYGO credit usage
 ├── search <query>              # Web search
 ├── extract <urls...>           # Extract content from URLs
 ├── crawl <url>                 # Crawl a website
@@ -214,6 +216,11 @@ tvly search "query" --json
 tvly auth --json
 tvly extract https://example.com --json
 tvly update --check --json
+
+# Explicit JSON Lines for result sets and research streams
+tvly search "query" --jsonl
+tvly extract https://example.com https://example.org --jsonl
+tvly research "question" --stream --jsonl
 
 # Durable artifacts: format follows the extension
 tvly search "query" -o results.json
@@ -238,13 +245,68 @@ tvly research poll <id> --json                   # wait and get result
 
 # Global options
 tvly --version         # show version
-tvly --status          # show version + auth status
+tvly --status          # show version, auth mode and API-key plan usage
 tvly --status --json   # structured status
+tvly status --json     # equivalent status command
+tvly usage --json      # full credit usage (API-key authentication)
 ```
 
 `-o` writes Markdown for `.md`/`.markdown` paths and JSON otherwise. `--json`
 always forces JSON. Saved commands print only a short summary and the artifact
 path; existing files are preserved unless `--force` is provided.
+
+Machine-readable failures use one stable envelope on stdout; progress and
+diagnostics remain on stderr:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "research_timeout",
+    "message": "Research timed out after 600s.",
+    "stage": "poll",
+    "retryable": true,
+    "request_id": "request-id"
+  }
+}
+```
+
+`--json` emits one JSON document. `--jsonl` emits typed result records followed
+by a summary record; with research streaming, each API event is one line.
+Normal result JSON, status and usage output are already indented; no `--pretty`
+flag is needed. JSONL records and machine-readable errors remain compact.
+
+### Keyless mode and credit usage
+
+`tvly auth`, `tvly status` and `tvly --status` explicitly report `keyless` when no
+credential is configured. Search and extract still work, subject to rate-limit
+caps. JSON keeps `authenticated: false` and adds `mode`, which is one of
+`keyless`, `api_key` or `oauth`. A failed OAuth refresh remains an error rather
+than silently switching to keyless access.
+
+When a keyless cap is reached, the CLI shows the retry delay once and gives
+CLI-native actions: `tvly login` for browser sign-in, or create an API key at
+the dashboard and run `tvly login --api-key tvly-YOUR_KEY` for full option
+support. Signup links use `utm_source=tavily-cli&utm_medium=cli`. Unavailable
+x402 payment instructions are omitted. JSON and JSONL preserve the cap code,
+window, retry delay and bonus-credit details alongside the CLI actions.
+
+`tvly usage` shows API-key, plan and PAYGO credits; `tvly usage --json` returns
+the [Usage API response](https://docs.tavily.com/documentation/api-reference/endpoint/usage).
+It requires an API key. Keyless and browser OAuth sessions receive an actionable
+authentication error without a usage request. Missing usage values are displayed
+as `not reported`, never as zero.
+
+With API-key auth, both status forms also request a plan summary with a
+five-second network timeout. If this lookup fails, status still exits successfully
+and reports the auth state plus `usage: null` and `usage_error` in JSON (a warning
+on stderr in human mode). Run `tvly usage` to check usage explicitly with a
+nonzero exit on failure. `tvly auth` remains the auth-only check. OAuth/keyless
+status explains why account usage is unavailable.
+
+The browser callback page offers a next-step command and a dashboard link.
+The terminal confirms sign-in after token exchange completes. The page loads
+no external assets and does not send callback URLs as referrers.
 
 ### Exit Codes
 
@@ -253,8 +315,9 @@ path; existing files are preserved unless `--force` is provided.
 | 0 | Success |
 | 1 | Local setup or update error |
 | 2 | Invalid input / usage error |
-| 3 | Authentication error |
+| 3 | Authentication or usage-limit error |
 | 4 | API or update-check error |
+| 5 | Partial result treated as failure by `--fail-on-partial` |
 
 ## Command Reference
 
@@ -278,6 +341,7 @@ path; existing files are preserved unless `--force` is provided.
 | `-o` / `--output` | Save JSON (`.json`) or Markdown (`.md`) |
 | `--save` | Save JSON to a generated path under `.tavily/search/` |
 | `--force` | Overwrite an existing `--output` file |
+| `--jsonl` | Emit one result per JSON line, followed by a summary |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly update`
@@ -308,6 +372,8 @@ automation can distinguish an available release from a supported self-update.
 | `-o` / `--output` | Save JSON (`.json`) or complete Markdown (`.md`) |
 | `--save` | Save JSON to a generated path under `.tavily/extract/` |
 | `--force` | Overwrite an existing `--output` file |
+| `--fail-on-partial` | Exit 5 if any requested URL fails |
+| `--jsonl` | Emit one extraction per JSON line, followed by a summary |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly crawl`
@@ -330,6 +396,7 @@ automation can distinguish an available release from a supported self-update.
 | `--timeout` | Max wait (10-150 seconds) |
 | `-o` / `--output` | Save JSON to file |
 | `--output-dir` | Save each page as .md file in directory |
+| `--jsonl` | Emit one crawled page per JSON line, followed by a summary |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly map`
@@ -347,6 +414,7 @@ automation can distinguish an available release from a supported self-update.
 | `-o` / `--output` | Save JSON (`.json`) or Markdown (`.md`) |
 | `--save` | Save JSON to a generated path under `.tavily/map/` |
 | `--force` | Overwrite an existing `--output` file |
+| `--jsonl` | Emit one discovered URL per JSON line, followed by a summary |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly research <query>` / `tvly research run <query>`
@@ -363,6 +431,7 @@ automation can distinguish an available release from a supported self-update.
 | `-o` / `--output` | Save JSON (`.json`) or Markdown (`.md`) |
 | `--save` | Save `report.md` and `report.json` under `.tavily/research/` |
 | `--force` | Overwrite existing output files |
+| `--jsonl` | Emit one streaming event per line (or one final non-stream result) |
 | `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly research status`

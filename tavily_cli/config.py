@@ -499,6 +499,13 @@ def is_oauth_token(key: str) -> bool:
     return not key.startswith("tvly-") and _decode_jwt_payload(key) is not None
 
 
+def credential_mode(key: str | None) -> str:
+    """Describe transport capability without treating keyless as authentication."""
+    if not key:
+        return "keyless"
+    return "oauth" if is_oauth_token(key) else "api_key"
+
+
 def get_api_key_or_exit(*, json_mode: bool = False) -> str:
     """Get the API key or print an error and exit."""
     import sys
@@ -512,6 +519,16 @@ def get_api_key_or_exit(*, json_mode: bool = False) -> str:
 
         handle_oauth_refresh_error(e, json_mode)
     if not key:
+        if json_mode:
+            from tavily_cli.common import emit_error
+
+            emit_error(
+                "authentication_required",
+                "No Tavily API key found.",
+                stage="auth",
+                retryable=False,
+            )
+            sys.exit(3)
         from rich.console import Console
         console = Console(stderr=True)
         console.print("  [#FAA2FB]> Error:[/#FAA2FB] No Tavily API key found.")
@@ -586,6 +603,17 @@ def require_api_key_friendly(command_name: str, *, json_mode: bool = False) -> s
         handle_oauth_refresh_error(e, json_mode)
     if key:
         return key
+
+    if json_mode:
+        from tavily_cli.common import emit_error
+
+        emit_error(
+            "authentication_required",
+            f"The {command_name} command requires authentication.",
+            stage="auth",
+            retryable=False,
+        )
+        sys.exit(3)
 
     from rich.console import Console
     console = Console(stderr=True)

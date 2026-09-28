@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import html
 import json
 import math
 import secrets
@@ -20,6 +21,8 @@ import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from importlib.resources import files
+from string import Template
 from typing import Literal
 
 import httpx
@@ -444,6 +447,8 @@ def run_browser_login(
             body = _callback_html(success=ok)
             self.send_response(200 if ok else 400)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -494,21 +499,22 @@ def run_browser_login(
 
 
 def _callback_html(*, success: bool) -> bytes:
+    """Render a self-contained handoff page; the terminal confirms token exchange."""
     if success:
-        message = "You're signed in. You can close this tab and return to the terminal."
-        color = "#9BC0AE"
-        title = "Tavily CLI"
+        title = "Back to your terminal"
+        label = "Authorization received"
+        message = "Check your terminal to confirm sign-in, then try your first search. You can close this tab."
+        command = 'tvly search "What\'s new in AI?" --max-results 3'
+        next_step = "After sign-in completes, try"
     else:
+        title = "Let's try that again"
+        label = "Sign-in interrupted"
         message = "Sign-in didn't complete. Return to the terminal for details."
-        color = "#FAA2FB"
-        title = "Tavily CLI"
-    html = f"""<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><title>{title}</title></head>
-<body style="font-family: system-ui, sans-serif; background:#111; color:#eee;
-             display:flex; min-height:100vh; align-items:center; justify-content:center;">
-  <div style="max-width:32rem; text-align:center;">
-    <p style="color:{color}; font-size:1.25rem; font-weight:600;">tavily</p>
-    <p>{message}</p>
-  </div>
-</body></html>"""
-    return html.encode("utf-8")
+        command = "tvly login"
+        next_step = "When you're ready, retry with"
+    template = Template(files("tavily_cli").joinpath("oauth_callback.html").read_text(encoding="utf-8"))
+    return template.substitute(
+        title=html.escape(title), label=html.escape(label), message=html.escape(message),
+        command=html.escape(command), next_step=html.escape(next_step),
+        state="success" if success else "error",
+    ).encode("utf-8")

@@ -199,7 +199,9 @@ def test_init_noninteractive_auth_failure_is_json(monkeypatch: pytest.MonkeyPatc
     assert result.exit_code == 3
     output = json.loads(result.stdout)
     assert output["ok"] is False
+    assert output["error"]["code"] == "initialization_auth_failed"
     assert output["error"]["stage"] == "auth"
+    assert output["error"]["retryable"] is False
     assert output["skills"]["skipped"] is True
 
 
@@ -214,4 +216,6 @@ def test_init_live_search_failure_exits_four(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result.exit_code == 4
     output = json.loads(result.stdout)
+    assert output["error"]["code"] == "initialization_verification_failed"
     assert output["error"]["stage"] == "live_search"
+    assert output["error"]["retryable"] is True
