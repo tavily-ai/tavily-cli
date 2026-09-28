@@ -80,11 +80,7 @@ def search(
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
 
-    validate_artifact_options(
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    validate_artifact_options(output_file=output_file, save=save, force=force)
 
     kwargs: dict = {"query": query}
     if search_depth is not None:
@@ -131,10 +127,5 @@ def search(
         handle_api_error(e, machine_mode)
 
     print_search_results(
-        response,
-        json_mode=json_output,
-        jsonl_mode=jsonl,
-        output_file=output_file,
-        save=save,
-        force=force,
+        response, json_mode=json_output, jsonl_mode=jsonl, output_file=output_file, save=save, force=force,
     )

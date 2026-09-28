@@ -59,11 +59,7 @@ def extract(
     if json_output and jsonl:
         raise click.UsageError("Use either --json or --jsonl, not both.")
 
-    validate_artifact_options(
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    validate_artifact_options(output_file=output_file, save=save, force=force)
 
     url_list = list(urls)
     if len(url_list) > 20:

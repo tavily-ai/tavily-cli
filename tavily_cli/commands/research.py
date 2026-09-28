@@ -207,13 +207,7 @@ def _render_stream(
         "content": full_content,
         "sources": sources,
     }
-    print_research_result(
-        result,
-        json_mode=json_mode,
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    print_research_result(result, json_mode=json_mode, output_file=output_file, save=save, force=force)
 
 
 @research.command()
@@ -272,11 +266,7 @@ def run(
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
 
-    validate_artifact_options(
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    validate_artifact_options(output_file=output_file, save=save, force=force)
 
     schema = None
     if output_schema:
@@ -330,13 +320,7 @@ def run(
                     force=force,
                 )
             else:
-                _render_stream(
-                    stream_resp,
-                    json_mode=json_mode,
-                    output_file=output_file,
-                    save=save,
-                    force=force,
-                )
+                _render_stream(stream_resp, json_mode=json_mode, output_file=output_file, save=save, force=force)
         except click.ClickException:
             raise
         except Exception as e:
@@ -364,13 +348,7 @@ def run(
         if jsonl:
             _emit_research_jsonl([result], output_file=output_file, force=force)
             return
-        print_research_result(
-            result,
-            json_mode=json_mode,
-            output_file=output_file,
-            save=save,
-            force=force,
-        )
+        print_research_result(result, json_mode=json_mode, output_file=output_file, save=save, force=force)
         return
 
     request_id = result.get("request_id")
@@ -384,13 +362,7 @@ def run(
             _emit_research_jsonl([pending_result], output_file=output_file, force=force)
             return
         if output_file or save:
-            print_research_result(
-                pending_result,
-                json_mode=json_mode,
-                output_file=output_file,
-                save=save,
-                force=force,
-            )
+            print_research_result(pending_result, json_mode=json_mode, output_file=output_file, save=save, force=force)
         else:
             emit(pending_result, json_mode=True)
         return
@@ -458,13 +430,7 @@ def run(
         _emit_research_jsonl([response], output_file=output_file, force=force)
         return
 
-    print_research_result(
-        response,
-        json_mode=json_mode,
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    print_research_result(response, json_mode=json_mode, output_file=output_file, save=save, force=force)
 
 
 @research.command()
@@ -538,11 +504,7 @@ def poll(
     from tavily_cli.theme import err_console
 
     json_mode = _resolve_json(ctx, json_flag)
-    validate_artifact_options(
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    validate_artifact_options(output_file=output_file, save=save, force=force)
     require_api_key_friendly("research poll", json_mode=json_mode)
     client = get_client(client_name=client_name, json_mode=json_mode)
 
@@ -603,10 +565,4 @@ def poll(
             machine_mode=json_mode,
         )
 
-    print_research_result(
-        response,
-        json_mode=json_mode,
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    print_research_result(response, json_mode=json_mode, output_file=output_file, save=save, force=force)

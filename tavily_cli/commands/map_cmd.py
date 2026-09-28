@@ -57,11 +57,7 @@ def map_urls(
         raise click.UsageError("Use either --json or --jsonl, not both.")
     machine_mode = json_output or jsonl
 
-    validate_artifact_options(
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    validate_artifact_options(output_file=output_file, save=save, force=force)
 
     require_api_key_friendly("map", json_mode=machine_mode)
     client = get_client(client_name=client_name, json_mode=machine_mode)
@@ -97,10 +93,5 @@ def map_urls(
         handle_api_error(e, machine_mode)
 
     print_map_results(
-        response,
-        json_mode=json_output,
-        jsonl_mode=jsonl,
-        output_file=output_file,
-        save=save,
-        force=force,
+        response, json_mode=json_output, jsonl_mode=jsonl, output_file=output_file, save=save, force=force,
     )
