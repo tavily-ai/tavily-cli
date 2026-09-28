@@ -58,13 +58,6 @@ def _resolve_json(ctx: click.Context, local_flag: bool) -> bool:
     return False
 
 
-def _research_failure_message(response: dict) -> str:
-    error = response.get("error")
-    if isinstance(error, dict):
-        return str(error.get("message") or error.get("detail") or "Research task failed.")
-    return str(error or response.get("detail") or "Research task failed.")
-
-
 def _fail_research(
     response: dict,
     *,
@@ -75,7 +68,11 @@ def _fail_research(
     machine_mode: bool,
 ) -> None:
     """Emit one stable failure and terminate research with an operational error."""
-    message = _research_failure_message(response)
+    error = response.get("error")
+    if isinstance(error, dict):
+        message = str(error.get("message") or error.get("detail") or "Research task failed.")
+    else:
+        message = str(error or response.get("detail") or "Research task failed.")
     if machine_mode:
         emit_error(
             code,
@@ -473,8 +470,6 @@ def status(ctx: click.Context, request_id: str, json_flag: bool, client_name: st
         console.print(f"  [bold]Status:[/bold]   [{status_style}]{escape(sanitize_control(s))}[/{status_style}]")
         if s == "completed":
             console.print(f"  [dim]Run 'tvly research poll {safe_request_id}' to view results.[/dim]")
-        elif s == "failed":
-            console.print(f"  [#FAA2FB]Error:[/#FAA2FB] {escape(sanitize_control(response.get('error', 'Unknown error')))}")
 
 
 @research.command()

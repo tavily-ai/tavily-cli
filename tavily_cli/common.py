@@ -72,19 +72,15 @@ def emit_error(
     **details: Any,
 ) -> None:
     """Write one stable error document to stdout."""
-    click.echo(
-        json.dumps(
-            error_payload(
-                code,
-                message,
-                stage=stage,
-                retryable=retryable,
-                request_id=request_id,
-                **details,
-            ),
-            ensure_ascii=False,
-        )
+    payload = error_payload(
+        code,
+        message,
+        stage=stage,
+        retryable=retryable,
+        request_id=request_id,
+        **details,
     )
+    click.echo(json.dumps(payload, ensure_ascii=False))
 
 
 def handle_keyless_cap_hit(e: TavilyKeylessLimitError, json_mode: bool) -> None:

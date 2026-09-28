@@ -538,8 +538,8 @@ def print_extract_results(
         path = output_file
         if save:
             path = str(Path(".tavily") / "extract" / f"{_artifact_timestamp()}.jsonl")
+        emit_jsonl(records, output_file=path, force=force, create_parents=save)
         if path:
-            emit_jsonl(records, output_file=path, force=force, create_parents=save)
             payload = failure.copy() if failure else {"ok": True}
             payload.update({
                 "saved": True,
@@ -547,8 +547,6 @@ def print_extract_results(
                 "artifacts": [path],
             })
             click.echo(json.dumps(payload, ensure_ascii=False))
-        else:
-            emit_jsonl(records)
         return
 
     if failure and json_mode:
