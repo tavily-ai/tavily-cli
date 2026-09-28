@@ -123,13 +123,7 @@ def _render_stream(
         "content": full_content,
         "sources": sources,
     }
-    print_research_result(
-        result,
-        json_mode=json_mode,
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    print_research_result(result, json_mode=json_mode, output_file=output_file, save=save, force=force)
 
 
 @research.command()
@@ -181,11 +175,7 @@ def run(
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
 
-    validate_artifact_options(
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    validate_artifact_options(output_file=output_file, save=save, force=force)
 
     require_api_key_friendly("research", json_mode=json_mode)
     client = get_client(client_name=client_name, json_mode=json_mode)
@@ -229,13 +219,7 @@ def run(
                             continue
                         click.echo(json.dumps(event, ensure_ascii=False))
             else:
-                _render_stream(
-                    stream_resp,
-                    json_mode=json_mode,
-                    output_file=output_file,
-                    save=save,
-                    force=force,
-                )
+                _render_stream(stream_resp, json_mode=json_mode, output_file=output_file, save=save, force=force)
         except click.ClickException:
             raise
         except Exception as e:
@@ -251,13 +235,7 @@ def run(
     # If the initial response is already complete (e.g., MCP endpoint returns
     # the full result synchronously), skip polling entirely.
     if result.get("status") in ("completed", "failed") or result.get("content"):
-        print_research_result(
-            result,
-            json_mode=json_mode,
-            output_file=output_file,
-            save=save,
-            force=force,
-        )
+        print_research_result(result, json_mode=json_mode, output_file=output_file, save=save, force=force)
         return
 
     request_id = result.get("request_id")
@@ -268,13 +246,7 @@ def run(
     if no_wait:
         pending_result = {"request_id": request_id, "status": result.get("status", "pending")}
         if output_file or save:
-            print_research_result(
-                pending_result,
-                json_mode=json_mode,
-                output_file=output_file,
-                save=save,
-                force=force,
-            )
+            print_research_result(pending_result, json_mode=json_mode, output_file=output_file, save=save, force=force)
         else:
             emit(pending_result, json_mode=True)
         return
@@ -296,11 +268,7 @@ def run(
             timeout_result = {"request_id": request_id, "status": "timeout"}
             if output_file or save:
                 print_research_result(
-                    timeout_result,
-                    json_mode=json_mode,
-                    output_file=output_file,
-                    save=save,
-                    force=force,
+                    timeout_result, json_mode=json_mode, output_file=output_file, save=save, force=force,
                 )
             else:
                 emit(timeout_result, json_mode=True)
@@ -333,13 +301,7 @@ def run(
                     )
                 return
 
-    print_research_result(
-        response,
-        json_mode=json_mode,
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    print_research_result(response, json_mode=json_mode, output_file=output_file, save=save, force=force)
 
 
 @research.command()
@@ -403,11 +365,7 @@ def poll(
     from tavily_cli.theme import err_console
 
     json_mode = _resolve_json(ctx, json_flag)
-    validate_artifact_options(
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    validate_artifact_options(output_file=output_file, save=save, force=force)
     require_api_key_friendly("research poll", json_mode=json_mode)
     client = get_client(client_name=client_name, json_mode=json_mode)
 
@@ -427,11 +385,7 @@ def poll(
             timeout_result = {"request_id": request_id, "status": "timeout"}
             if output_file or save:
                 print_research_result(
-                    timeout_result,
-                    json_mode=json_mode,
-                    output_file=output_file,
-                    save=save,
-                    force=force,
+                    timeout_result, json_mode=json_mode, output_file=output_file, save=save, force=force,
                 )
             else:
                 emit(timeout_result, json_mode=True)
@@ -463,10 +417,4 @@ def poll(
                     )
                 return
 
-    print_research_result(
-        response,
-        json_mode=json_mode,
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    print_research_result(response, json_mode=json_mode, output_file=output_file, save=save, force=force)

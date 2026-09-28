@@ -51,11 +51,7 @@ def extract(
     from tavily_cli.config import get_client_or_keyless
     from tavily_cli.output import print_extract_results, validate_artifact_options
 
-    validate_artifact_options(
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    validate_artifact_options(output_file=output_file, save=save, force=force)
 
     url_list = list(urls)
     if len(url_list) > 20:
@@ -89,10 +85,4 @@ def extract(
     except Exception as e:
         handle_api_error(e, json_output)
 
-    print_extract_results(
-        response,
-        json_mode=json_output,
-        output_file=output_file,
-        save=save,
-        force=force,
-    )
+    print_extract_results(response, json_mode=json_output, output_file=output_file, save=save, force=force)
