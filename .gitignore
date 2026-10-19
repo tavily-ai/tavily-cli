@@ -25,6 +25,9 @@ env/
 .env
 .env.local
 
+# Generated Tavily artifacts
+.tavily/
+
 # OS
 .DS_Store
 Thumbs.db
