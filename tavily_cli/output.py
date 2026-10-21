@@ -11,21 +11,25 @@ and rendered via ``Text``/validated links rather than markup-bearing f-strings.
 from __future__ import annotations
 
 import json
+import shlex
+from html import unescape
+from textwrap import shorten
 from typing import Any
 from urllib.parse import urlparse
 
 import click
+from markdown_it import MarkdownIt
 from rich.console import Console
 from rich.markdown import Markdown
-from rich.rule import Rule
+from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
-from rich.tree import Tree
 
 from tavily_cli.common import sanitize_control
 
 console = Console()
 err_console = Console(stderr=True)
+_preview_markdown = MarkdownIt("commonmark").enable("table")
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +55,7 @@ def _safe_link(url: Any, label: Any | None = None, *, style: str = "") -> Text:
     """
     clean_url = sanitize_control(url)
     display = sanitize_control(label) if label is not None else clean_url
-    text = Text(display, style=style)
+    text = Text(display, style=style, overflow="fold")
     try:
         scheme = urlparse(clean_url).scheme
     except ValueError:
@@ -72,21 +76,73 @@ def _score_label(score: float | None) -> Text:
     return label
 
 
-def _footer(label: str, count: int, unit: str, response_time: float | None) -> None:
-    """Print a consistent footer line across all commands."""
-    parts = [f"{count} {unit}"]
-    if response_time:
-        parts.append(f"{response_time:.2f}s")
+def _heading(label: str, detail: str | None = None) -> None:
+    console.print(Text(label, style="bold #5CD9E6"), width=min(console.width, 100))
+    if detail:
+        console.print(_safe_link(detail, style="dim"), width=min(console.width, 100))
     console.print()
-    console.print(Rule(f"[dim]{' | '.join(parts)}[/dim]", style="dim"))
 
 
-def _domain(url: str) -> str:
-    """Extract domain from a URL."""
-    try:
-        return urlparse(url).netloc
-    except Exception:
-        return url
+def _footer(label: str, count: int, unit: str, response_time: float | None) -> None:
+    parts = [f"{count} {unit}"]
+    if response_time is not None:
+        parts.append(f"{response_time:.2f}s")
+    console.print(Text(" · ".join(parts), style="dim"), width=min(console.width, 100))
+
+
+def _markdown(content: Any) -> Markdown | Syntax:
+    if isinstance(content, (dict, list)):
+        return Syntax(json.dumps(content, indent=2, ensure_ascii=False), "json", word_wrap=True, background_color="default")
+    document = Markdown(sanitize_control(content))
+    # Markdown parsing decodes entities, including encoded control characters.
+    pending = list(document.parsed)
+    while pending:
+        token = pending.pop()
+        token.content = sanitize_control(token.content)
+        pending.extend(token.children or [])
+        for attr in ("href", "src"):
+            if attr in token.attrs:
+                target = sanitize_control(token.attrs[attr])
+                try:
+                    allowed = urlparse(target).scheme in {"http", "https"}
+                except ValueError:
+                    allowed = False
+                token.attrs[attr] = target if allowed else ""
+    return document
+
+
+def _item(index: int, total: int, title: Text, url: str = "", *, body=None, meta: str = "") -> None:
+    table = Table.grid(padding=(0, 1), expand=True)
+    table.add_column(width=len(str(total)) + 1, style="bold #8385F9")
+    table.add_column(ratio=1)
+    table.add_row(Text(f"{index}."), title)
+    if url:
+        table.add_row("", _safe_link(url, style="#FAA2FB"))
+    if meta:
+        table.add_row("", _safe_text(meta, style="dim"))
+    if body is not None:
+        table.add_row("", body)
+    console.print(table, width=min(console.width, 100))
+    console.print()
+
+
+def _page_title(page: dict, index: int) -> Text:
+    title = page.get("title")
+    if not title:
+        for line in (page.get("raw_content") or "").splitlines():
+            if line.startswith("# "):
+                title = _search_preview(line)
+                break
+    return _safe_text(unescape(title or f"Page {index}"), style="bold")
+
+
+def _failures(failed: list[dict]) -> None:
+    if not failed:
+        return
+    _heading("Failed pages")
+    for index, item in enumerate(failed, 1):
+        _item(index, len(failed), _safe_text(item.get("error") or "Unknown error", style="#FFC769"), item.get("url") or "")
+
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +168,25 @@ def emit(data: Any, *, json_mode: bool, output_file: str | None = None, pretty: 
 # Search
 # ---------------------------------------------------------------------------
 
+def _search_preview(content: str) -> str:
+    """Flatten Markdown into a compact preview, keeping the source's wording."""
+    parts = []
+    for token in _preview_markdown.parse(sanitize_control(content)):
+        if token.type == "inline":
+            for child in token.children or []:
+                if child.type in {"softbreak", "hardbreak"}:
+                    parts.append(" ")
+                elif child.type == "html_inline" and child.content.lower().startswith(("<br>", "<br/", "<br ")):
+                    parts.append(" ")
+                elif child.type in {"text", "code_inline", "image"}:
+                    parts.append(child.content)
+            parts.append(" ")
+        elif token.type in {"fence", "code_block", "html_block"}:
+            parts.extend((token.content, " "))
+    # Markdown entity decoding can introduce control characters: sanitize again.
+    return shorten(sanitize_control("".join(parts)), width=360, placeholder="…")
+
+
 def print_search_results(data: dict, *, json_mode: bool, output_file: str | None = None) -> None:
     if json_mode:
         emit(data, json_mode=True, output_file=output_file, pretty=True)
@@ -121,58 +196,33 @@ def print_search_results(data: dict, *, json_mode: bool, output_file: str | None
         emit(data, json_mode=True, output_file=output_file, pretty=True)
         return
 
-    results = data.get("results", [])
+    results = data.get("results") or []
     answer = data.get("answer")
-    response_time = data.get("response_time")
-
+    _heading("Search")
     if answer:
+        console.print(Text("Answer", style="bold"))
+        console.print(_markdown(answer), width=min(console.width, 100))
         console.print()
-        console.print("  [#5CD9E6 bold]Answer[/#5CD9E6 bold]")
-        console.print()
-        console.print(Markdown(sanitize_control(answer)), width=min(console.width, 100))
-        console.print()
-
     if not results:
-        console.print("[dim]No results found.[/dim]")
-        return
-
-    for i, r in enumerate(results, 1):
-        title = r.get("title", "Untitled")
-        url = r.get("url", "")
-        content = r.get("content", "")
-        score = r.get("score")
-
-        header = Text()
-        header.append(f"{i}. ", style="bold #8385F9")
-        header.append(sanitize_control(title), style="bold")
-        header.append("  ")
-        header.append_text(_score_label(score))
-        console.print(header)
-
-        domain_line = Text("   ")
-        domain_line.append_text(_safe_link(url, _domain(url), style="#FAA2FB"))
-        console.print(domain_line)
-
-        if content:
-            snippet = content[:300]
-            if len(content) > 300:
-                snippet += "..."
-            snippet_line = Text("   ")
-            snippet_line.append(sanitize_control(snippet), style="dim")
-            console.print(snippet_line)
+        console.print(Text("No results found.", style="dim"))
         console.print()
+    for index, result in enumerate(results, 1):
+        title = sanitize_control(unescape(result.get("title") or "Untitled"))
+        header = Text(" ".join(title.split()), style="bold")
+        if result.get("score") is not None:
+            header.append("  ")
+            header.append_text(_score_label(result["score"]))
+        preview = _search_preview(result.get("content") or "")
+        _item(index, len(results), header, result.get("url") or "", body=_safe_text(preview) if preview else None)
 
-    _footer("Search", len(results), "results", response_time)
-
-    images = data.get("images")
+    images = data.get("images") or []
     if images:
-        console.print()
-        console.print(f"[bold]Images ({len(images)}):[/bold]")
-        for img in images:
-            if isinstance(img, dict):
-                console.print(_safe_text(f"  {img.get('url', img)}"))
-            else:
-                console.print(_safe_text(f"  {img}"))
+        _heading(f"Images ({len(images)})")
+        for index, img in enumerate(images, 1):
+            url = img.get("url", "") if isinstance(img, dict) else img
+            description = img.get("description") if isinstance(img, dict) else None
+            _item(index, len(images), _safe_text(description or f"Image {index}", style="bold"), url)
+    _footer("Search", len(results), "result" if len(results) == 1 else "results", data.get("response_time"))
 
 
 # ---------------------------------------------------------------------------
@@ -184,38 +234,28 @@ def print_extract_results(data: dict, *, json_mode: bool, output_file: str | Non
         emit(data, json_mode=True, output_file=output_file, pretty=True)
         return
 
-    results = data.get("results", [])
-    failed = data.get("failed_results", [])
-
-    for r in results:
-        url = r.get("url", "")
-        raw = r.get("raw_content", "")
-        char_count = len(raw) if raw else 0
-
+    results = data.get("results") or []
+    failed = data.get("failed_results") or []
+    _heading("Extract")
+    if not results:
+        console.print(Text("No pages extracted.", style="dim"))
         console.print()
-        url_line = Text("  ")
-        url_line.append(sanitize_control(url), style="#5CD9E6 bold")
-        console.print(url_line)
-        meta_line = Text("  ")
-        meta_line.append(f"{sanitize_control(_domain(url))} ({char_count:,} chars)", style="dim")
-        console.print(meta_line)
-        console.print()
-        if raw:
-            console.print(Markdown(sanitize_control(raw[:3000])), width=min(console.width, 100))
-        else:
-            console.print("  [dim]No content[/dim]")
-        console.print()
-
-    if failed:
-        console.print("[#FFC769]Failed extractions:[/#FFC769]")
-        for f_item in failed:
-            line = Text("  ")
-            line.append("x ", style="#FAA2FB")
-            line.append(f"{sanitize_control(f_item.get('url'))}: {sanitize_control(f_item.get('error'))}")
-            console.print(line)
-
-    response_time = data.get("response_time")
-    _footer("Extract", len(results), f"extracted, {len(failed)} failed", response_time)
+    for index, page in enumerate(results, 1):
+        raw = page.get("raw_content") or ""
+        preview = raw[:3000]
+        if len(raw) > 3000:
+            preview = preview.rsplit(" ", 1)[0] + "…"
+        if preview.startswith("# "):
+            preview = preview.partition("\n")[2].lstrip()
+        _item(
+            index, len(results), _page_title(page, index), page.get("url") or "",
+            meta=f"{len(raw):,} characters" + (" · preview" if len(raw) > 3000 else ""),
+            body=_markdown(preview) if raw else Text("No content returned.", style="dim"),
+        )
+    _failures(failed)
+    _footer("Extract", len(results), f"extracted · {len(failed)} failed", data.get("response_time"))
+    if any(len(page.get("raw_content") or "") > 3000 for page in results):
+        console.print(Text("Preview shown. Use --json for complete content.", style="dim"), width=min(console.width, 100))
 
 
 # ---------------------------------------------------------------------------
@@ -237,38 +277,22 @@ def print_crawl_results(
         emit(data, json_mode=True, output_file=output_file, pretty=True)
         return
 
-    results = data.get("results", [])
-    base_url = data.get("base_url", "")
-
-    tree = Tree(_safe_text(base_url, style="bold"))
-
-    # Group pages by path prefix for a hierarchical view
-    for r in results:
-        url = r.get("url", "")
-        raw = r.get("raw_content", "")
-        char_count = len(raw) if raw else 0
-
-        # Show path relative to base
-        try:
-            parsed = urlparse(url)
-            path = parsed.path or "/"
-        except Exception:
-            path = url
-
-        label = Text()
-        label.append(sanitize_control(path), style="#5CD9E6")
-        label.append(f"  ({char_count:,} chars)", style="dim")
-
-        node = tree.add(label)
-        if raw:
-            # First non-empty line as preview
-            preview = raw.strip().split("\n")[0][:120]
-            node.add(_safe_text(preview, style="dim"))
-
-    console.print(tree)
-
-    response_time = data.get("response_time")
-    _footer("Crawl", len(results), "pages", response_time)
+    results = data.get("results") or []
+    _heading("Crawl", data.get("base_url"))
+    if not results:
+        console.print(Text("No pages found.", style="dim"))
+        console.print()
+    for index, page in enumerate(results, 1):
+        raw = page.get("raw_content") or ""
+        _item(
+            index, len(results), _page_title(page, index), page.get("url") or "",
+            meta=f"{len(raw):,} characters",
+            body=_safe_text(_search_preview(raw) if raw else "No content returned."),
+        )
+    _failures(data.get("failed_results") or [])
+    _footer("Crawl", len(results), "page" if len(results) == 1 else "pages", data.get("response_time"))
+    if results:
+        console.print(Text("Content previews shown. Use --json or --output-dir for complete pages.", style="dim"), width=min(console.width, 100))
 
 
 def _save_crawl_to_dir(data: dict, output_dir: str) -> None:
@@ -306,17 +330,18 @@ def print_map_results(data: dict, *, json_mode: bool, output_file: str | None = 
         emit(data, json_mode=True, output_file=output_file, pretty=True)
         return
 
-    results = data.get("results", [])
-    base_url = data.get("base_url", "")
-
-    tree = Tree(_safe_text(base_url, style="bold"))
-    for url in results:
-        tree.add(_safe_link(url))
-
-    console.print(tree)
-
-    response_time = data.get("response_time")
-    _footer("Map", len(results), "URLs", response_time)
+    results = data.get("results") or []
+    _heading("Map", data.get("base_url"))
+    if not results:
+        console.print(Text("No URLs found.", style="dim"))
+    table = Table.grid(padding=(0, 1), expand=True)
+    table.add_column(width=len(str(len(results))) + 1, style="dim")
+    table.add_column(ratio=1)
+    for index, url in enumerate(results, 1):
+        table.add_row(Text(f"{index}."), _safe_link(url, style="#FAA2FB"))
+    console.print(table, width=min(console.width, 100))
+    console.print()
+    _footer("Map", len(results), "URL" if len(results) == 1 else "URLs", data.get("response_time"))
 
 
 # ---------------------------------------------------------------------------
@@ -344,43 +369,41 @@ def print_research_result(data: dict, *, json_mode: bool, output_file: str | Non
         emit(data, json_mode=True, output_file=output_file, pretty=True)
         return
 
-    status = data.get("status", "unknown")
-    content = data.get("content", "")
-    sources = data.get("sources", [])
-
+    content = data.get("content")
+    status = data.get("status") or ("completed" if content else "unknown")
+    sources = data.get("sources") or []
     if status != "completed":
-        status_line = Text()
-        status_line.append("Status: ", style="bold")
-        status_line.append(sanitize_control(status))
-        console.print(status_line)
-        if data.get("error"):
-            error_line = Text()
-            error_line.append("Error: ", style="#FAA2FB")
-            error_line.append(sanitize_control(data["error"]))
-            console.print(error_line)
+        print_research_status(data)
         return
+    _heading("Research report")
 
-    # Render the research report as markdown
     if content:
-        console.print()
-        console.print("  [#5CD9E6 bold]Research Report[/#5CD9E6 bold]")
-        console.print()
-        console.print(Markdown(sanitize_control(content)), width=min(console.width, 100))
-
-    # Sources as a numbered table
+        console.print(_markdown(content), width=min(console.width, 100))
+    else:
+        console.print(Text("No report content returned.", style="dim"))
+    console.print()
     if sources:
-        console.print()
-        table = Table(title=f"Sources ({len(sources)})", show_lines=False, padding=(0, 1))
-        table.add_column("#", style="bold #8385F9", width=4)
-        table.add_column("Title", style="bold", ratio=2)
-        table.add_column("URL", style="#FAA2FB", ratio=3)
+        _heading("Source details")
+        for index, source in enumerate(sources, 1):
+            if isinstance(source, dict):
+                title = source.get("title") or f"Source {index}"
+                url = source.get("url") or ""
+            else:
+                title, url = f"Source {index}", source
+            _item(index, len(sources), _safe_text(unescape(title), style="bold"), url)
+    _footer("Research", len(sources), "source" if len(sources) == 1 else "sources", data.get("response_time"))
 
-        for i, s in enumerate(sources, 1):
-            title = s.get("title", "")
-            url = s.get("url", "")
-            table.add_row(str(i), _safe_text(title), _safe_link(url))
 
-        console.print(table)
-
-    response_time = data.get("response_time")
-    _footer("Research", len(sources), "sources", response_time)
+def print_research_status(data: dict) -> None:
+    """Render the task receipt for human run --no-wait and status commands."""
+    _heading("Research")
+    status = data.get("status") or "unknown"
+    console.print(_safe_text(f"Status: {status}", style="bold"), width=min(console.width, 100))
+    if data.get("error"):
+        console.print(_safe_text(f"Error: {data['error']}", style="#FFC769"), width=min(console.width, 100))
+    if data.get("request_id"):
+        request_id = sanitize_control(data["request_id"])
+        console.print(_safe_text(f"Request: {request_id}", style="dim"), width=min(console.width, 100))
+        if status != "failed":
+            verb = "View report" if status == "completed" else "Resume"
+            console.print(_safe_text(f"{verb}: tvly research poll {shlex.quote(request_id)}"), width=min(console.width, 100))

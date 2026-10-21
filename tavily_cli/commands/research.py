@@ -229,7 +229,12 @@ def run(
         handle_api_error(RuntimeError(f"Unexpected API response: {result}"), json_mode)
 
     if no_wait:
-        emit({"request_id": request_id, "status": result.get("status", "pending")}, json_mode=True, output_file=output_file)
+        receipt = {"request_id": request_id, "status": result.get("status", "pending")}
+        if json_mode or output_file:
+            emit(receipt, json_mode=True, output_file=output_file)
+        else:
+            from tavily_cli.output import print_research_status
+            print_research_status(receipt)
         return
 
     elapsed = 0
@@ -293,16 +298,8 @@ def status(ctx: click.Context, request_id: str, json_flag: bool, client_name: st
     if json_mode:
         emit(response, json_mode=True)
     else:
-        from tavily_cli.theme import console
-        s = response.get("status", "unknown")
-        status_style = {"completed": "#9BC0AE", "failed": "#FAA2FB"}.get(s, "#FFC769")
-        safe_request_id = escape(sanitize_control(request_id))
-        console.print(f"  [bold]Request:[/bold]  {safe_request_id}")
-        console.print(f"  [bold]Status:[/bold]   [{status_style}]{escape(sanitize_control(s))}[/{status_style}]")
-        if s == "completed":
-            console.print(f"  [dim]Run 'tvly research poll {safe_request_id}' to view results.[/dim]")
-        elif s == "failed":
-            console.print(f"  [#FAA2FB]Error:[/#FAA2FB] {escape(sanitize_control(response.get('error', 'Unknown error')))}")
+        from tavily_cli.output import print_research_status
+        print_research_status({**response, "request_id": request_id})
 
 
 @research.command()
