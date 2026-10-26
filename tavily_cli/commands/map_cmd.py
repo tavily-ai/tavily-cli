@@ -18,6 +18,7 @@ from tavily_cli.common import client_name_option, handle_api_error, json_option
 @click.option("--select-domains", default=None, help="Comma-separated regex patterns for domains to include.")
 @click.option("--exclude-domains", default=None, help="Comma-separated regex patterns for domains to exclude.")
 @click.option("--allow-external/--no-external", default=None, help="Include external domain links.")
+@click.option("--include-usage", is_flag=True, default=False, help="Include credit usage in the response. API-key login only.")
 @click.option("--timeout", type=float, default=None, help="Max wait time in seconds (10-150).")
 @click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
 @client_name_option
@@ -33,6 +34,7 @@ def map_urls(
     select_domains: str | None,
     exclude_domains: str | None,
     allow_external: bool | None,
+    include_usage: bool,
     timeout: float | None,
     output_file: str | None,
     client_name: str | None,
@@ -69,6 +71,8 @@ def map_urls(
         kwargs["exclude_domains"] = [d.strip() for d in exclude_domains.split(",")]
     if allow_external is not None:
         kwargs["allow_external"] = allow_external
+    if include_usage:
+        kwargs["include_usage"] = True
     if timeout is not None:
         kwargs["timeout"] = timeout
 

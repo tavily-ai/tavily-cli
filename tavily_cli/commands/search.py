@@ -19,7 +19,7 @@ from tavily_cli.common import (
 @click.command()
 @click.argument("query", required=False)
 @click.option("--depth", "search_depth", type=click.Choice(["ultra-fast", "fast", "basic", "advanced"]), default=None, help="Search depth (default: basic).")
-@click.option("--max-results", type=int, default=None, help="Maximum results, 0-20 (default: 5).")
+@click.option("--max-results", type=click.IntRange(0, 20), default=None, help="Maximum results, 0-20 (API default: 10).")
 @click.option("--topic", type=click.Choice(["general", "news", "finance"]), default=None, help="Search topic.")
 @click.option("--time-range", type=click.Choice(["day", "week", "month", "year"]), default=None, help="Relative time filter.")
 @click.option("--start-date", default=None, help="Results after date (YYYY-MM-DD).")
@@ -31,7 +31,17 @@ from tavily_cli.common import (
 @click.option("--include-raw-content", is_flag=False, flag_value="markdown", default=None, help="Include full page content ('markdown' or 'text').")
 @click.option("--include-images", is_flag=True, default=False, help="Include image results.")
 @click.option("--include-image-descriptions", is_flag=True, default=False, help="Include AI image descriptions.")
-@click.option("--chunks-per-source", type=int, default=None, help="Chunks per source (advanced/fast depth only).")
+@click.option("--chunks-per-source", type=click.IntRange(1, 3), default=None, help="Chunks per source, 1-3 (basic, advanced and fast depth).")
+@click.option("--include-domains-mode", type=click.Choice(["prefer", "restrict"]), default=None, help="With --include-domains: prefer boosts them, restrict returns only those hosts and subdomains. API-key login only.")
+@click.option("--language", default=None, help="Boost results in this language (for example english). API-key login only.")
+@click.option("--filter-by-language", is_flag=True, default=False, help="Return only results in --language (requires --language). API-key login only.")
+@click.option("--safe-search", is_flag=True, default=False, help="Filter unsafe content (not available with fast or ultra-fast depth). API-key login only.")
+@click.option("--exact-match", is_flag=True, default=False, help="Require the quoted phrases in the query to match exactly.")
+@click.option("--auto-parameters", is_flag=True, default=False, help="Let Tavily choose search parameters from the query (may use advanced depth, 2 credits). API-key login only.")
+@click.option("--include-favicon", is_flag=True, default=False, help="Include each result's favicon URL.")
+@click.option("--include-usage", is_flag=True, default=False, help="Include credit usage in the response. API-key login only.")
+@click.option("--include-published-date", is_flag=True, default=False, help="Include published_date per result (beta). API-key login only.")
+@click.option("--filter-by-published-date", is_flag=True, default=False, help="Drop results outside the date window, including undated ones; implies --include-published-date. API-key login only.")
 @click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
 @client_name_option
 @json_option
@@ -51,6 +61,16 @@ def search(
     include_images: bool,
     include_image_descriptions: bool,
     chunks_per_source: int | None,
+    include_domains_mode: str | None,
+    language: str | None,
+    filter_by_language: bool,
+    safe_search: bool,
+    exact_match: bool,
+    auto_parameters: bool,
+    include_favicon: bool,
+    include_usage: bool,
+    include_published_date: bool,
+    filter_by_published_date: bool,
     output_file: str | None,
     client_name: str | None,
     json_output: bool,
@@ -69,6 +89,13 @@ def search(
         query = sys.stdin.read(100_000).strip()
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
+
+    if include_domains_mode and not include_domains:
+        raise click.UsageError("--include-domains-mode requires --include-domains.")
+    if filter_by_language and not language:
+        raise click.UsageError("--filter-by-language requires --language.")
+    if safe_search and search_depth in ("fast", "ultra-fast"):
+        raise click.UsageError("--safe-search is not available with --depth fast or ultra-fast.")
 
     kwargs: dict = {"query": query}
     if search_depth is not None:
@@ -99,6 +126,26 @@ def search(
         kwargs["include_image_descriptions"] = True
     if chunks_per_source is not None:
         kwargs["chunks_per_source"] = chunks_per_source
+    if include_domains_mode is not None:
+        kwargs["include_domains_mode"] = include_domains_mode
+    if language is not None:
+        kwargs["language"] = language
+    if filter_by_language:
+        kwargs["filter_by_language"] = True
+    if safe_search:
+        kwargs["safe_search"] = True
+    if exact_match:
+        kwargs["exact_match"] = True
+    if auto_parameters:
+        kwargs["auto_parameters"] = True
+    if include_favicon:
+        kwargs["include_favicon"] = True
+    if include_usage:
+        kwargs["include_usage"] = True
+    if include_published_date:
+        kwargs["include_published_date"] = True
+    if filter_by_published_date:
+        kwargs["filter_by_published_date"] = True
 
     from tavily_cli.oauth import OAuthError
     from tavily_cli.theme import spinner

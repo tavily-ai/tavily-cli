@@ -22,6 +22,8 @@ from tavily_cli.common import client_name_option, handle_api_error, json_option
 @click.option("--exclude-domains", default=None, help="Comma-separated regex patterns for domains to exclude.")
 @click.option("--allow-external/--no-external", default=None, help="Include external domain links.")
 @click.option("--include-images", is_flag=True, default=False, help="Include images.")
+@click.option("--include-favicon", is_flag=True, default=False, help="Include each page's favicon URL. API-key login only.")
+@click.option("--include-usage", is_flag=True, default=False, help="Include credit usage in the response. API-key login only.")
 @click.option("--timeout", type=float, default=None, help="Max wait time in seconds (10-150).")
 @click.option("--output", "-o", "output_file", default=None, help="Save JSON output to file.")
 @click.option("--output-dir", default=None, help="Save each page as a .md file in this directory.")
@@ -42,6 +44,8 @@ def crawl(
     exclude_domains: str | None,
     allow_external: bool | None,
     include_images: bool,
+    include_favicon: bool,
+    include_usage: bool,
     timeout: float | None,
     output_file: str | None,
     output_dir: str | None,
@@ -87,6 +91,10 @@ def crawl(
         kwargs["allow_external"] = allow_external
     if include_images:
         kwargs["include_images"] = True
+    if include_favicon:
+        kwargs["include_favicon"] = True
+    if include_usage:
+        kwargs["include_usage"] = True
     if timeout is not None:
         kwargs["timeout"] = timeout
 

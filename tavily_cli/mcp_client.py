@@ -30,6 +30,36 @@ def _raise_if_api_error(parsed: dict) -> None:
     )
 
 
+# Search/crawl/map/extract options that exist in the API but that the hosted MCP tools used for OAuth
+# login do not accept (checked against the remote MCP tool schemas). Fail with the flag name instead of
+# sending an argument the tool rejects.
+_API_KEY_ONLY_ARGUMENTS = {
+    "tavily_search": {
+        "include_domains_mode": "--include-domains-mode",
+        "language": "--language",
+        "filter_by_language": "--filter-by-language",
+        "safe_search": "--safe-search",
+        "include_published_date": "--include-published-date",
+        "filter_by_published_date": "--filter-by-published-date",
+        "include_usage": "--include-usage",
+        "auto_parameters": "--auto-parameters",
+    },
+    "tavily_extract": {"include_usage": "--include-usage"},
+    "tavily_crawl": {"include_usage": "--include-usage", "include_favicon": "--include-favicon"},
+    "tavily_map": {"include_usage": "--include-usage"},
+}
+
+
+def _reject_api_key_only_arguments(tool_name: str, arguments: dict) -> None:
+    from tavily_cli.common import TavilyAPIError
+
+    for key, flag in _API_KEY_ONLY_ARGUMENTS.get(tool_name, {}).items():
+        if key in arguments:
+            raise TavilyAPIError(
+                f"{flag} is not available with OAuth login. Use an API key: tvly login --api-key tvly-YOUR_KEY"
+            )
+
+
 def _call_mcp_tool(
     token: str,
     tool_name: str,
@@ -39,6 +69,7 @@ def _call_mcp_tool(
     client_name: str | None = None,
 ) -> dict:
     """Call a Tavily MCP tool via JSON-RPC and return the parsed result."""
+    _reject_api_key_only_arguments(tool_name, arguments)
     request_body = {
         "jsonrpc": "2.0",
         "id": 1,

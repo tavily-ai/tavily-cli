@@ -398,7 +398,7 @@ skip authentication.
 | Option | Description |
 |--------|-------------|
 | `--depth` | `ultra-fast`, `fast`, `basic` (default), `advanced` |
-| `--max-results` | Maximum results, 0-20 (default: 5) |
+| `--max-results` | Maximum results, 0-20 (API default: 10) |
 | `--topic` | `general` (default), `news`, `finance` |
 | `--time-range` | `day`, `week`, `month`, `year` |
 | `--start-date` | Results after date (YYYY-MM-DD) |
@@ -410,7 +410,17 @@ skip authentication.
 | `--include-raw-content` | Include full page (`markdown` or `text`) |
 | `--include-images` | Include image results |
 | `--include-image-descriptions` | Include AI image descriptions |
-| `--chunks-per-source` | Chunks per source (advanced/fast depth only) |
+| `--chunks-per-source` | Chunks per source, 1-3 (basic, advanced and fast depth) |
+| `--include-domains-mode` | With `--include-domains`: `prefer` boosts them, `restrict` returns only those hosts and subdomains (API key) |
+| `--language` | Boost results in a language, for example `english` (API key) |
+| `--filter-by-language` | Return only results in `--language` (API key) |
+| `--safe-search` | Filter unsafe content; not with `fast`/`ultra-fast` (API key) |
+| `--exact-match` | Require quoted phrases in the query to match exactly |
+| `--auto-parameters` | Let Tavily pick parameters from the query; may use advanced depth, 2 credits (API key) |
+| `--include-favicon` | Include each result's favicon URL |
+| `--include-usage` | Include credit usage in the response (API key) |
+| `--include-published-date` | Include `published_date` per result, beta (API key) |
+| `--filter-by-published-date` | Drop results outside the date window, including undated ones (API key) |
 | `-o` / `--output` | Save output to file |
 | `--client-name` | Set optional `client_name` for request attribution |
 
@@ -438,7 +448,9 @@ automation can distinguish an available release from a supported self-update.
 | `--extract-depth` | `basic` (default) or `advanced` |
 | `--format` | `markdown` (default) or `text` |
 | `--include-images` | Include image URLs |
-| `--timeout` | Max wait (1-60 seconds) |
+| `--include-favicon` | Include each page's favicon URL |
+| `--include-usage` | Include credit usage in the response (API key) |
+| `--timeout` | Max wait (1-60 seconds; API default 10 basic, 30 advanced) |
 | `-o` / `--output` | Save output to file |
 | `--client-name` | Set optional `client_name` for request attribution |
 
@@ -459,6 +471,8 @@ automation can distinguish an available release from a supported self-update.
 | `--exclude-domains` | Regex for domains to exclude |
 | `--allow-external` | Include external links (default: true) |
 | `--include-images` | Include images |
+| `--include-favicon` | Include each page's favicon URL |
+| `--include-usage` | Include credit usage in the response |
 | `--timeout` | Max wait (10-150 seconds) |
 | `-o` / `--output` | Save JSON to file |
 | `--output-dir` | Save each page as .md file in directory |
@@ -477,6 +491,7 @@ automation can distinguish an available release from a supported self-update.
 | `--select-domains` | Regex patterns for domains to include |
 | `--exclude-domains` | Regex patterns for domains to exclude |
 | `--allow-external` | Include external links |
+| `--include-usage` | Include credit usage in the response (API key) |
 | `--timeout` | Max wait (10-150 seconds) |
 | `-o` / `--output` | Save output to file |
 | `--client-name` | Set optional `client_name` for request attribution |
@@ -547,6 +562,7 @@ tvly set-default --claude --project
 |----------|-------------|
 | `TAVILY_API_KEY` | API key (highest priority, no login needed) |
 | `TAVILY_HUMAN_ID` | Optional identifier attached to every request for usage attribution |
+| `TAVILY_CLIENT_NAME` | Optional integration or partner name sent as `client_name` (`X-Client-Name`) on every request, on the API-key and OAuth paths alike. Precedence: `--client-name` > `TAVILY_CLIENT_NAME` > `client_name` in `~/.tavily/config.json` |
 
 ```bash
 # Via env var (highest priority)
@@ -554,7 +570,12 @@ export TAVILY_HUMAN_ID=alice@example.com
 
 # Or persist it in the config file
 # (~/.tavily/config.json — set the "human_id" key)
+
+# Identify the integration that calls the CLI (plugins and skills)
+export TAVILY_CLIENT_NAME=my-integration
 ```
+
+Options marked "API key" are accepted by the Tavily API but not by the hosted MCP tools used with OAuth login (`tvly login`); with OAuth login the CLI stops and names the flag. Use `tvly login --api-key` to use them. `--include-usage` on `map` and `crawl` follows the same rule.
 
 ## Related
 
