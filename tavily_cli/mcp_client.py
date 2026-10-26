@@ -30,7 +30,7 @@ def _raise_if_api_error(parsed: dict) -> None:
     )
 
 
-# Search/crawl/map/extract options that exist in the API but that the hosted MCP tools used for OAuth
+# Search/crawl/map/extract/research options that exist in the API but that the hosted MCP tools used for OAuth
 # login do not accept (checked against the remote MCP tool schemas). Fail with the flag name instead of
 # sending an argument the tool rejects.
 _API_KEY_ONLY_ARGUMENTS = {
@@ -43,6 +43,15 @@ _API_KEY_ONLY_ARGUMENTS = {
         "filter_by_published_date": "--filter-by-published-date",
         "include_usage": "--include-usage",
         "auto_parameters": "--auto-parameters",
+    },
+    "tavily_research": {
+        "output_schema": "--output-schema",
+        "citation_format": "--citation-format",
+        "stream": "--stream",
+        "include_domains": "--include-domains",
+        "exclude_domains": "--exclude-domains",
+        "output_length": "--output-length",
+        "files": "--file",
     },
     "tavily_extract": {"include_usage": "--include-usage"},
     "tavily_crawl": {"include_usage": "--include-usage", "include_favicon": "--include-favicon"},

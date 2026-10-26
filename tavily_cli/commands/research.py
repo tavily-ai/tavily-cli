@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 import sys
 import time
 
@@ -56,6 +58,69 @@ def _resolve_json(ctx: click.Context, local_flag: bool) -> bool:
             return True
         ctx = ctx.parent  # type: ignore[assignment]
     return False
+
+
+_FILE_TYPES = (".txt", ".md", ".json")
+_MAX_FILES = 5
+_MAX_WORDS = 80_000
+_MAX_DOMAINS = 20
+
+
+def _split_domains(value: str | None, flag: str) -> list[str] | None:
+    if not value:
+        return None
+    domains = [d.strip() for d in value.split(",") if d.strip()]
+    if len(domains) > _MAX_DOMAINS:
+        raise click.UsageError(f"{flag} accepts at most {_MAX_DOMAINS} domains.")
+    return domains or None
+
+
+def _read_files(paths: tuple[str, ...]) -> list[dict] | None:
+    """Encode --file arguments as the API's files entries (.txt/.md/.json, up to 5, 80,000 words)."""
+    if not paths:
+        return None
+    if len(paths) > _MAX_FILES:
+        raise click.UsageError(f"--file can be given at most {_MAX_FILES} times.")
+    entries: list[dict] = []
+    total_words = 0
+    for path in paths:
+        name = os.path.basename(path)
+        if not name.lower().endswith(_FILE_TYPES):
+            raise click.UsageError(f"--file {name}: supported types are {', '.join(_FILE_TYPES)}.")
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+        except OSError as e:
+            raise click.UsageError(f"--file {name}: {e.strerror or e}.")
+        words = len(raw.decode("utf-8", errors="replace").split())
+        total_words += words
+        if words > _MAX_WORDS:
+            raise click.UsageError(f"--file {name} has {words} words; the limit is {_MAX_WORDS} per file.")
+        entries.append({"name": name, "data": base64.b64encode(raw).decode("ascii"), "type": "base64"})
+    if total_words > _MAX_WORDS:
+        raise click.UsageError(f"--file contents total {total_words} words; the limit is {_MAX_WORDS} across all files.")
+    return entries
+
+
+def _create_research(client, kwargs: dict) -> dict:
+    """Create a research task. The API documents HTTP 201 for creation; tavily-python 0.8.x only
+    accepts 200 and then returns None, so 201 is normalised to 200 on this one call."""
+    session = getattr(client, "session", None)
+    if session is None or kwargs.get("stream"):
+        return client.research(**kwargs)
+    original = session.post
+
+    def post(url, *args, **kw):
+        response = original(url, *args, **kw)
+        if response.status_code == 201 and str(url).endswith("/research"):
+            response.status_code = 200
+        return response
+
+    session.post = post
+    try:
+        return client.research(**kwargs)
+    finally:
+        session.post = original
 
 
 def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
@@ -126,6 +191,10 @@ def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
 @click.option("--stream", is_flag=True, default=False, help="Stream results in real-time.")
 @click.option("--output-schema", default=None, help="Path to JSON schema file for structured output.")
 @click.option("--citation-format", type=click.Choice(["numbered", "mla", "apa", "chicago"]), default=None, help="Citation format.")
+@click.option("--include-domains", default=None, help="Comma-separated domains the research should prefer (soft preference, up to 20). API-key login only.")
+@click.option("--exclude-domains", default=None, help="Comma-separated domains never to use (hard block, up to 20). API-key login only.")
+@click.option("--output-length", type=click.Choice(["short", "standard", "long"]), default=None, help="Target report length (default: standard). API-key login only.")
+@click.option("--file", "files", multiple=True, type=click.Path(), help="Attach a .txt, .md or .json file as a source (repeat up to 5 times; 80,000 words max). API-key login only.")
 @click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
 @click.option("--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
 @click.option("--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
@@ -140,6 +209,10 @@ def run(
     stream: bool,
     output_schema: str | None,
     citation_format: str | None,
+    include_domains: str | None,
+    exclude_domains: str | None,
+    output_length: str | None,
+    files: tuple[str, ...],
     output_file: str | None,
     poll_interval: int,
     timeout: int,
@@ -179,6 +252,17 @@ def run(
         kwargs["output_schema"] = schema
     if citation_format is not None:
         kwargs["citation_format"] = citation_format
+    domains_in = _split_domains(include_domains, "--include-domains")
+    domains_out = _split_domains(exclude_domains, "--exclude-domains")
+    if domains_in:
+        kwargs["include_domains"] = domains_in
+    if domains_out:
+        kwargs["exclude_domains"] = domains_out
+    if output_length is not None:
+        kwargs["output_length"] = output_length
+    file_entries = _read_files(files)
+    if file_entries:
+        kwargs["files"] = file_entries
 
     from tavily_cli.theme import err_console, spinner
 
@@ -213,7 +297,7 @@ def run(
 
     try:
         with spinner("Starting research...", json_mode=json_mode):
-            result = client.research(**kwargs)
+            result = _create_research(client, kwargs)
     except Exception as e:
         handle_api_error(e, json_mode)
 

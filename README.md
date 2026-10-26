@@ -265,7 +265,18 @@ tvly research poll REQUEST_ID --json          # wait and get result
 
 # Structured output
 tvly research "AI market size" --output-schema schema.json --json
+
+# Steer sources and report size (API-key login only)
+tvly research "EU AI Act obligations" --include-domains "ec.europa.eu,eur-lex.europa.eu" \
+  --exclude-domains "reddit.com" --output-length short
+tvly research "Summarise our Q3 notes against market data" --file notes.md --file data.json
 ```
+
+`--include-domains` is a soft preference and `--exclude-domains` a hard block (up to 20 domains each).
+`--file` attaches `.txt`, `.md` or `.json` files (up to 5 files, 80,000 words) as sources.
+Under browser OAuth login the hosted research tool only accepts the query and `--model`, so
+`--output-schema`, `--citation-format`, `--stream`, `--include-domains`, `--exclude-domains`,
+`--output-length` and `--file` stop with a message naming the flag; use an API key for them.
 
 ### Submit Feedback
 
