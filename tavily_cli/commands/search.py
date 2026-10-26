@@ -94,6 +94,8 @@ def search(
         raise click.UsageError("--include-domains-mode requires --include-domains.")
     if filter_by_language and not language:
         raise click.UsageError("--filter-by-language requires --language.")
+    if chunks_per_source is not None and search_depth == "ultra-fast":
+        raise click.UsageError("--chunks-per-source does not apply with --depth ultra-fast.")
     if safe_search and search_depth in ("fast", "ultra-fast"):
         raise click.UsageError("--safe-search is not available with --depth fast or ultra-fast.")
 

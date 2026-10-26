@@ -123,62 +123,114 @@ def _create_research(client, kwargs: dict) -> dict:
         session.post = original
 
 
+def _sse_records(stream_resp):
+    """Yield (event, data_text) for each complete SSE record in a stream of bytes or str chunks.
+
+    Records are separated by a blank line; LF, CRLF and CR line endings are accepted and a record may be
+    split across transport chunks (or inside a multi-byte character). A final record without a trailing
+    blank line is still delivered at end of stream.
+    """
+    import codecs
+    import re
+
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    buffer = ""
+
+    def split(record: str):
+        event, data = None, []
+        for line in record.split("\n"):
+            if line.startswith("event:"):
+                event = line[6:].strip()
+            elif line.startswith("data:"):
+                data.append(line[5:].lstrip(" "))
+        return event, "\n".join(data)
+
+    for raw_chunk in stream_resp:
+        buffer += decoder.decode(raw_chunk) if isinstance(raw_chunk, bytes) else raw_chunk
+        buffer = re.sub(r"\r\n?", "\n", buffer)
+        while "\n\n" in buffer:
+            record, buffer = buffer.split("\n\n", 1)
+            if record.strip():
+                yield split(record)
+    buffer += decoder.decode(b"", final=True)
+    buffer = re.sub(r"\r\n?", "\n", buffer)
+    if buffer.strip():
+        yield split(buffer)
+
+
 def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
-    """Parse SSE stream chunks, show live status, then render with Rich like non-stream."""
+    """Parse the Research SSE stream, show live status, then render like a non-stream result.
+
+    The report is only rendered as completed when the terminal `event: done` frame arrived; an error
+    frame or a stream that ends early fails the command instead of presenting partial output.
+    """
     from tavily_cli.output import print_research_result
     from tavily_cli.theme import err_console
 
     content_parts: list[str] = []
+    structured = None
     sources: list[dict] = []
     current_step: str | None = None
+    done = False
 
-    for raw_chunk in stream_resp:
-        text = raw_chunk.decode("utf-8") if isinstance(raw_chunk, bytes) else raw_chunk
+    for event, data_text in _sse_records(stream_resp):
+        if event == "done":
+            done = True
+            break
+        try:
+            data = json.loads(data_text) if data_text else {}
+        except (json.JSONDecodeError, TypeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
 
-        for line in text.splitlines():
-            if not line.startswith("data:"):
-                continue
-            try:
-                data = json.loads(line[5:])
-            except (json.JSONDecodeError, TypeError):
-                continue
+        if event == "error" or data.get("object") == "error":
+            detail = data.get("error") or data_text or "unknown error"
+            raise click.ClickException(f"Research stream failed: {sanitize_control(str(detail))}")
 
-            delta = (data.get("choices") or [{}])[0].get("delta", {})
+        delta = (data.get("choices") or [{}])[0].get("delta", {})
 
-            # --- Tool calls: show live status updates ---
-            tool_calls = delta.get("tool_calls", {})
-            if tool_calls.get("type") == "tool_call":
-                for tc in tool_calls.get("tool_call", []):
-                    name = tc.get("name", "")
-                    args = tc.get("arguments", "")
-                    step = f"{name}: {args}" if args else name
-                    if step != current_step:
-                        current_step = step
-                        err_console.print(f"  [dim]{escape(sanitize_control(step))}[/dim]")
+        # --- Tool calls: show live status updates ---
+        tool_calls = delta.get("tool_calls", {})
+        if tool_calls.get("type") == "tool_call":
+            for tc in tool_calls.get("tool_call", []):
+                name = tc.get("name", "")
+                args = tc.get("arguments", "")
+                step = f"{name}: {args}" if args else name
+                if step != current_step:
+                    current_step = step
+                    err_console.print(f"  [dim]{escape(sanitize_control(step))}[/dim]")
 
-            if tool_calls.get("type") == "tool_response":
-                for tr in tool_calls.get("tool_response", []):
-                    name = tr.get("name", "")
-                    if name == "WebSearch":
-                        src_count = len(tr.get("sources", []))
-                        if src_count:
-                            err_console.print(f"  [dim]Found {src_count} sources[/dim]")
+        if tool_calls.get("type") == "tool_response":
+            for tr in tool_calls.get("tool_response", []):
+                name = tr.get("name", "")
+                if name == "WebSearch":
+                    src_count = len(tr.get("sources", []))
+                    if src_count:
+                        err_console.print(f"  [dim]Found {src_count} sources[/dim]")
 
-            # --- Content: collect the report text ---
-            content = delta.get("content")
+        # --- Content: collect the report text (structured output arrives as an object) ---
+        content = delta.get("content")
+        if isinstance(content, str):
             if content:
                 content_parts.append(content)
+        elif content is not None:
+            structured = content
 
-            # --- Sources: collect final source list ---
-            src_list = delta.get("sources")
-            if src_list:
-                sources = src_list
+        # --- Sources: collect final source list ---
+        src_list = delta.get("sources")
+        if src_list:
+            sources = src_list
 
-    # Render using the same formatter as non-stream output.
-    full_content = "".join(content_parts)
+    if not done:
+        raise click.ClickException(
+            "Research stream ended before the final 'done' event; the report may be incomplete. "
+            "Re-run, or use `tvly research run --no-wait` and `tvly research poll`."
+        )
+
     result = {
         "status": "completed",
-        "content": full_content,
+        "content": structured if structured is not None else "".join(content_parts),
         "sources": sources,
     }
     print_research_result(result, json_mode=False, output_file=output_file)
@@ -276,19 +328,24 @@ def run(
                 # machine-parseable JSON and lets json.dumps escape any control
                 # characters in server content (raw bytes would otherwise reach
                 # the terminal as escape sequences).
-                for chunk in stream_resp:
-                    text = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
-                    for line in text.splitlines():
-                        if not line.startswith("data:"):
-                            continue
-                        payload = line[5:].strip()
-                        if not payload:
-                            continue
-                        try:
-                            event = json.loads(payload)
-                        except (json.JSONDecodeError, TypeError):
-                            continue
-                        click.echo(json.dumps(event, ensure_ascii=False))
+                done = False
+                for event_name, data_text in _sse_records(stream_resp):
+                    if event_name == "done":
+                        done = True
+                        break
+                    try:
+                        event = json.loads(data_text) if data_text else None
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if event is None:
+                        continue
+                    click.echo(json.dumps(event, ensure_ascii=False))
+                    if event_name == "error" or (isinstance(event, dict) and event.get("object") == "error"):
+                        raise click.ClickException("Research stream failed: see the error event above.")
+                if not done:
+                    raise click.ClickException(
+                        "Research stream ended before the final 'done' event; the output may be incomplete."
+                    )
             else:
                 _render_stream(stream_resp, output_file=output_file)
         except Exception as e:

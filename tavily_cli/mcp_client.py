@@ -30,40 +30,64 @@ def _raise_if_api_error(parsed: dict) -> None:
     )
 
 
-# Search/crawl/map/extract/research options that exist in the API but that the hosted MCP tools used for OAuth
-# login do not accept (checked against the remote MCP tool schemas). Fail with the flag name instead of
-# sending an argument the tool rejects.
-_API_KEY_ONLY_ARGUMENTS = {
+# Options the hosted MCP tools used for OAuth login do not accept, checked against the pinned remote MCP
+# tool schemas (tavily-remote-mcp 835129d: remote_mcp/tools/*.py). Each entry maps an argument to its CLI
+# flag and an optional value test: when given, only values for which it returns True are rejected. The
+# CLI stops by flag (and value) name before any request instead of sending an argument the tool rejects.
+# This reflects source, not a deployed server; update it when the hosted tools change.
+_ALWAYS = None
+
+
+def _not_bool(value: Any) -> bool:
+    return not isinstance(value, bool)
+
+
+_API_KEY_ONLY_ARGUMENTS: dict[str, dict[str, tuple[str, Any]]] = {
     "tavily_search": {
-        "include_domains_mode": "--include-domains-mode",
-        "language": "--language",
-        "filter_by_language": "--filter-by-language",
-        "safe_search": "--safe-search",
-        "include_published_date": "--include-published-date",
-        "filter_by_published_date": "--filter-by-published-date",
-        "include_usage": "--include-usage",
-        "auto_parameters": "--auto-parameters",
+        "include_domains_mode": ("--include-domains-mode", _ALWAYS),
+        "language": ("--language", _ALWAYS),
+        "filter_by_language": ("--filter-by-language", _ALWAYS),
+        "safe_search": ("--safe-search", _ALWAYS),
+        "include_published_date": ("--include-published-date", _ALWAYS),
+        "filter_by_published_date": ("--filter-by-published-date", _ALWAYS),
+        "include_usage": ("--include-usage", _ALWAYS),
+        "auto_parameters": ("--auto-parameters", _ALWAYS),
+        "chunks_per_source": ("--chunks-per-source", _ALWAYS),
+        "include_answer": ("--include-answer", _ALWAYS),  # the hosted search tool has no include_answer
+        "include_raw_content": ("--include-raw-content", _not_bool),  # hosted tool takes a boolean only
+        "topic": ("--topic finance", lambda value: value == "finance"),  # hosted tool: general or news
     },
     "tavily_research": {
-        "output_schema": "--output-schema",
-        "citation_format": "--citation-format",
-        "stream": "--stream",
-        "include_domains": "--include-domains",
-        "exclude_domains": "--exclude-domains",
-        "output_length": "--output-length",
-        "files": "--file",
+        "output_schema": ("--output-schema", _ALWAYS),
+        "citation_format": ("--citation-format", _ALWAYS),
+        "stream": ("--stream", _ALWAYS),
+        "include_domains": ("--include-domains", _ALWAYS),
+        "exclude_domains": ("--exclude-domains", _ALWAYS),
+        "output_length": ("--output-length", _ALWAYS),
+        "files": ("--file", _ALWAYS),
     },
-    "tavily_extract": {"include_usage": "--include-usage"},
-    "tavily_crawl": {"include_usage": "--include-usage", "include_favicon": "--include-favicon"},
-    "tavily_map": {"include_usage": "--include-usage"},
+    "tavily_extract": {
+        "chunks_per_source": ("--chunks-per-source", _ALWAYS),
+        "timeout": ("--timeout", _ALWAYS),
+        "include_usage": ("--include-usage", _ALWAYS),
+    },
+    "tavily_crawl": {
+        "chunks_per_source": ("--chunks-per-source", _ALWAYS),
+        "timeout": ("--timeout", _ALWAYS),
+        "include_usage": ("--include-usage", _ALWAYS),
+    },
+    "tavily_map": {
+        "timeout": ("--timeout", _ALWAYS),
+        "include_usage": ("--include-usage", _ALWAYS),
+    },
 }
 
 
 def _reject_api_key_only_arguments(tool_name: str, arguments: dict) -> None:
     from tavily_cli.common import TavilyAPIError
 
-    for key, flag in _API_KEY_ONLY_ARGUMENTS.get(tool_name, {}).items():
-        if key in arguments:
+    for key, (flag, incompatible) in _API_KEY_ONLY_ARGUMENTS.get(tool_name, {}).items():
+        if key in arguments and (incompatible is None or incompatible(arguments[key])):
             raise TavilyAPIError(
                 f"{flag} is not available with OAuth login. Use an API key: tvly login --api-key tvly-YOUR_KEY"
             )

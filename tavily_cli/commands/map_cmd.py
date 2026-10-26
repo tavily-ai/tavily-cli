@@ -19,7 +19,7 @@ from tavily_cli.common import client_name_option, handle_api_error, json_option
 @click.option("--exclude-domains", default=None, help="Comma-separated regex patterns for domains to exclude.")
 @click.option("--allow-external/--no-external", default=None, help="Include external domain links.")
 @click.option("--include-usage", is_flag=True, default=False, help="Include credit usage in the response. API-key login only.")
-@click.option("--timeout", type=float, default=None, help="Max wait time in seconds (10-150).")
+@click.option("--timeout", type=click.FloatRange(10, 150), default=None, help="Max wait time in seconds (10-150).")
 @click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
 @client_name_option
 @json_option

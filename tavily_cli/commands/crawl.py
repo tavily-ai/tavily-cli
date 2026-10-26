@@ -13,7 +13,7 @@ from tavily_cli.common import client_name_option, handle_api_error, json_option
 @click.option("--max-breadth", type=int, default=None, help="Links per page (default: 20).")
 @click.option("--limit", type=int, default=None, help="Total pages cap (default: 50).")
 @click.option("--instructions", default=None, help="Natural language guidance for the crawler.")
-@click.option("--chunks-per-source", type=int, default=None, help="Chunks per page (1-5, requires --instructions).")
+@click.option("--chunks-per-source", type=click.IntRange(1, 5), default=None, help="Chunks per page (1-5, requires --instructions).")
 @click.option("--extract-depth", type=click.Choice(["basic", "advanced"]), default=None, help="Extraction depth.")
 @click.option("--format", "fmt", type=click.Choice(["markdown", "text"]), default=None, help="Output format.")
 @click.option("--select-paths", default=None, help="Comma-separated regex patterns for paths to include.")
@@ -24,7 +24,7 @@ from tavily_cli.common import client_name_option, handle_api_error, json_option
 @click.option("--include-images", is_flag=True, default=False, help="Include images.")
 @click.option("--include-favicon", is_flag=True, default=False, help="Include each page's favicon URL. API-key login only.")
 @click.option("--include-usage", is_flag=True, default=False, help="Include credit usage in the response. API-key login only.")
-@click.option("--timeout", type=float, default=None, help="Max wait time in seconds (10-150).")
+@click.option("--timeout", type=click.FloatRange(10, 150), default=None, help="Max wait time in seconds (10-150).")
 @click.option("--output", "-o", "output_file", default=None, help="Save JSON output to file.")
 @click.option("--output-dir", default=None, help="Save each page as a .md file in this directory.")
 @client_name_option
@@ -60,6 +60,9 @@ def crawl(
     """
     from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import print_crawl_results
+
+    if chunks_per_source is not None and not instructions:
+        raise click.UsageError("--chunks-per-source requires --instructions.")
 
     require_api_key_friendly("crawl", json_mode=json_output)
     client = get_client(client_name=client_name, json_mode=json_output)
