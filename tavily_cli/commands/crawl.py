@@ -5,28 +5,29 @@ from __future__ import annotations
 import click
 
 from tavily_cli.common import client_name_option, handle_api_error, json_option
+from tavily_cli.mcp_client import oauth_option
 
 
 @click.command()
 @click.argument("url")
-@click.option("--max-depth", type=int, default=None, help="Levels deep to crawl (1-5, default: 1).")
-@click.option("--max-breadth", type=int, default=None, help="Links per page (default: 20).")
-@click.option("--limit", type=int, default=None, help="Total pages cap (default: 50).")
-@click.option("--instructions", default=None, help="Natural language guidance for the crawler.")
-@click.option("--chunks-per-source", type=click.IntRange(1, 5), default=None, help="Chunks per page (1-5, requires --instructions).")
-@click.option("--extract-depth", type=click.Choice(["basic", "advanced"]), default=None, help="Extraction depth.")
-@click.option("--format", "fmt", type=click.Choice(["markdown", "text"]), default=None, help="Output format.")
-@click.option("--select-paths", default=None, help="Comma-separated regex patterns for paths to include.")
-@click.option("--exclude-paths", default=None, help="Comma-separated regex patterns for paths to exclude.")
-@click.option("--select-domains", default=None, help="Comma-separated regex patterns for domains to include.")
-@click.option("--exclude-domains", default=None, help="Comma-separated regex patterns for domains to exclude.")
-@click.option("--allow-external/--no-external", default=None, help="Include external domain links.")
-@click.option("--include-images", is_flag=True, default=False, help="Include images.")
-@click.option("--include-favicon", is_flag=True, default=False, help="Include each page's favicon URL. API-key login only.")
-@click.option("--include-usage", is_flag=True, default=False, help="Include credit usage in the response. API-key login only.")
-@click.option("--timeout", type=click.FloatRange(10, 150), default=None, help="Max wait time in seconds (10-150).")
-@click.option("--output", "-o", "output_file", default=None, help="Save JSON output to file.")
-@click.option("--output-dir", default=None, help="Save each page as a .md file in this directory.")
+@oauth_option("tavily_crawl", "--max-depth", type=int, default=None, help="Levels deep to crawl (1-5, default: 1).")
+@oauth_option("tavily_crawl", "--max-breadth", type=int, default=None, help="Links per page (default: 20).")
+@oauth_option("tavily_crawl", "--limit", type=int, default=None, help="Total pages cap (default: 50).")
+@oauth_option("tavily_crawl", "--instructions", default=None, help="Natural language guidance for the crawler.")
+@oauth_option("tavily_crawl", "--chunks-per-source", type=click.IntRange(1, 5), default=None, help="Chunks per page (1-5, requires --instructions).")
+@oauth_option("tavily_crawl", "--extract-depth", type=click.Choice(["basic", "advanced"]), default=None, help="Extraction depth.")
+@oauth_option("tavily_crawl", "--format", "fmt", type=click.Choice(["markdown", "text"]), default=None, help="Output format.")
+@oauth_option("tavily_crawl", "--select-paths", default=None, help="Comma-separated regex patterns for paths to include.")
+@oauth_option("tavily_crawl", "--exclude-paths", default=None, help="Comma-separated regex patterns for paths to exclude.")
+@oauth_option("tavily_crawl", "--select-domains", default=None, help="Comma-separated regex patterns for domains to include.")
+@oauth_option("tavily_crawl", "--exclude-domains", default=None, help="Comma-separated regex patterns for domains to exclude.")
+@oauth_option("tavily_crawl", "--allow-external/--no-external", default=None, help="Include external domain links.")
+@oauth_option("tavily_crawl", "--include-images", is_flag=True, default=False, help="Include images.")
+@oauth_option("tavily_crawl", "--include-favicon", is_flag=True, default=False, help="Include each page's favicon URL.")
+@oauth_option("tavily_crawl", "--include-usage", is_flag=True, default=False, help="Include credit usage in the response.")
+@oauth_option("tavily_crawl", "--timeout", type=click.FloatRange(10, 150), default=None, help="Max wait time in seconds (10-150).")
+@oauth_option("tavily_crawl", "--output", "-o", "output_file", default=None, help="Save JSON output to file.")
+@oauth_option("tavily_crawl", "--output-dir", default=None, help="Save each page as a .md file in this directory.")
 @client_name_option
 @json_option
 def crawl(

@@ -73,14 +73,70 @@ _API_KEY_ONLY_ARGUMENTS: dict[str, dict[str, tuple[str, Any]]] = {
     },
     "tavily_crawl": {
         "chunks_per_source": ("--chunks-per-source", _ALWAYS),
+        "exclude_paths": ("--exclude-paths", _ALWAYS),
+        "exclude_domains": ("--exclude-domains", _ALWAYS),
+        "include_images": ("--include-images", _ALWAYS),
         "timeout": ("--timeout", _ALWAYS),
         "include_usage": ("--include-usage", _ALWAYS),
     },
     "tavily_map": {
+        "exclude_paths": ("--exclude-paths", _ALWAYS),
+        "exclude_domains": ("--exclude-domains", _ALWAYS),
         "timeout": ("--timeout", _ALWAYS),
         "include_usage": ("--include-usage", _ALWAYS),
     },
 }
+
+# Marker added to the help text of every option in the table above (and only those), so --help and the
+# README stay consistent with what the guard actually rejects.
+OAUTH_MARKER = "API-key login only."
+
+
+def guarded_flags(tool_name: str) -> dict[str, str]:
+    """Map each guarded CLI flag of a tool to its note: empty for always-guarded, else the rejected value."""
+    notes: dict[str, str] = {}
+    for flag, incompatible in _API_KEY_ONLY_ARGUMENTS.get(tool_name, {}).values():
+        name, _, value = flag.partition(" ")
+        notes[name] = "" if incompatible is None else (value or "some values")
+    return notes
+
+
+def oauth_option(tool_name: str, *param_decls: str, **attrs: Any):
+    """click.option that appends OAUTH_MARKER to the help of options the OAuth guard rejects."""
+    import click
+
+    flag = next((decl.split("/")[0] for decl in param_decls if decl.startswith("--")), None)
+    notes = guarded_flags(tool_name)
+    if flag in notes:
+        help_text = (attrs.get("help") or "").rstrip()
+        note = notes[flag]
+        if not note:
+            help_text += f" {OAUTH_MARKER}"
+        elif note == "some values":
+            help_text += f" Some values are {OAUTH_MARKER}"
+        else:
+            help_text += f" The `{note}` value is {OAUTH_MARKER}"
+        attrs["help"] = help_text.strip()
+    return click.option(*param_decls, **attrs)
+
+
+def render_oauth_readme_block() -> str:
+    """Markdown list of the options each command cannot send under OAuth login (README source of truth)."""
+    commands = {
+        "tavily_search": "tvly search",
+        "tavily_extract": "tvly extract",
+        "tavily_crawl": "tvly crawl",
+        "tavily_map": "tvly map",
+        "tavily_research": "tvly research run",
+    }
+    lines = []
+    for tool, command in commands.items():
+        flags = []
+        for flag, note in guarded_flags(tool).items():
+            detail = "" if not note else " (some values)" if note == "some values" else f" (only `{note}`)"
+            flags.append(f"`{flag}`{detail}")
+        lines.append(f"- `{command}`: " + ", ".join(flags))
+    return "\n".join(lines)
 
 
 def _reject_api_key_only_arguments(tool_name: str, arguments: dict) -> None:

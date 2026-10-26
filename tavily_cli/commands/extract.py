@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import click
+
 from tavily import TavilyKeylessLimitError
 
 from tavily_cli.common import (
@@ -12,19 +13,20 @@ from tavily_cli.common import (
     handle_oauth_refresh_error,
     json_option,
 )
+from tavily_cli.mcp_client import oauth_option
 
 
 @click.command()
 @click.argument("urls", nargs=-1, required=True)
-@click.option("--query", default=None, help="Rerank chunks by relevance to this query.")
-@click.option("--chunks-per-source", type=click.IntRange(1, 5), default=None, help="Chunks per source (1-5, requires --query).")
-@click.option("--extract-depth", type=click.Choice(["basic", "advanced"]), default=None, help="Extraction depth.")
-@click.option("--format", "fmt", type=click.Choice(["markdown", "text"]), default=None, help="Output format.")
-@click.option("--include-images", is_flag=True, default=False, help="Include image URLs.")
-@click.option("--include-favicon", is_flag=True, default=False, help="Include each page's favicon URL.")
-@click.option("--include-usage", is_flag=True, default=False, help="Include credit usage in the response. API-key login only.")
-@click.option("--timeout", type=click.FloatRange(1, 60), default=None, help="Max wait time in seconds (1-60; API default 10 basic, 30 advanced).")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@oauth_option("tavily_extract", "--query", default=None, help="Rerank chunks by relevance to this query.")
+@oauth_option("tavily_extract", "--chunks-per-source", type=click.IntRange(1, 5), default=None, help="Chunks per source (1-5, requires --query).")
+@oauth_option("tavily_extract", "--extract-depth", type=click.Choice(["basic", "advanced"]), default=None, help="Extraction depth.")
+@oauth_option("tavily_extract", "--format", "fmt", type=click.Choice(["markdown", "text"]), default=None, help="Output format.")
+@oauth_option("tavily_extract", "--include-images", is_flag=True, default=False, help="Include image URLs.")
+@oauth_option("tavily_extract", "--include-favicon", is_flag=True, default=False, help="Include each page's favicon URL.")
+@oauth_option("tavily_extract", "--include-usage", is_flag=True, default=False, help="Include credit usage in the response.")
+@oauth_option("tavily_extract", "--timeout", type=click.FloatRange(1, 60), default=None, help="Max wait time in seconds (1-60; API default 10 basic, 30 advanced).")
+@oauth_option("tavily_extract", "--output", "-o", "output_file", default=None, help="Save output to file.")
 @client_name_option
 @json_option
 def extract(

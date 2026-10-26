@@ -298,3 +298,202 @@ def test_guard_is_value_aware_for_topic_and_raw_content() -> None:
 
 def test_guard_covers_every_tool_with_unsupported_arguments() -> None:
     assert set(_API_KEY_ONLY_ARGUMENTS) == {"tavily_search", "tavily_research", "tavily_extract", "tavily_crawl", "tavily_map"}
+
+
+# --- RJSCLI2: complete OAuth guard, CR/LF-safe SSE framing, consistent guard documentation --------
+
+import re
+
+from tavily_cli.commands.research import _sse_records
+from tavily_cli.mcp_client import OAUTH_MARKER, guarded_flags, render_oauth_readme_block
+
+# Arguments each hosted MCP tool accepts, read from tavily-remote-mcp commit 835129d (remote_mcp/tools/*.py).
+HOSTED_ACCEPTED = {
+    "tavily_search": {
+        "query", "max_results", "search_depth", "topic", "time_range", "include_images", "include_image_descriptions",
+        "include_raw_content", "include_domains", "exclude_domains", "country", "include_favicon", "start_date",
+        "end_date", "exact_match",
+    },
+    "tavily_extract": {"urls", "extract_depth", "include_images", "format", "include_favicon", "query"},
+    "tavily_crawl": {
+        "url", "max_depth", "max_breadth", "limit", "instructions", "select_paths", "select_domains",
+        "allow_external", "extract_depth", "format", "include_favicon",
+    },
+    "tavily_map": {"url", "max_depth", "max_breadth", "limit", "instructions", "select_paths", "select_domains", "allow_external"},
+    "tavily_research": {"input", "model"},
+}
+COMMAND_MODULES = {
+    "tavily_search": "search.py",
+    "tavily_extract": "extract.py",
+    "tavily_crawl": "crawl.py",
+    "tavily_map": "map_cmd.py",
+    "tavily_research": "research.py",
+}
+
+
+@pytest.mark.parametrize(
+    "args, flag",
+    [
+        (["crawl", "https://example.com", "--exclude-paths", "/private/.*"], "--exclude-paths"),
+        (["crawl", "https://example.com", "--exclude-domains", "ads\\."], "--exclude-domains"),
+        (["crawl", "https://example.com", "--include-images"], "--include-images"),
+        (["map", "https://example.com", "--exclude-paths", "/private/.*"], "--exclude-paths"),
+        (["map", "https://example.com", "--exclude-domains", "ads\\."], "--exclude-domains"),
+    ],
+)
+def test_oauth_rejects_crawl_and_map_arguments_missing_from_the_hosted_schemas(oauth_posts: list[dict], args: list[str], flag: str) -> None:
+    result = run(*args, "--json")
+
+    assert result.exit_code != 0
+    assert f"{flag} is not available with OAuth login" in result.output
+    assert oauth_posts == [], "no MCP request may be made before the error"
+
+
+@pytest.mark.parametrize(
+    "args, sent_keys",
+    [
+        (["crawl", "https://example.com", "--select-paths", "/docs/.*", "--select-domains", "docs\\.", "--include-favicon"],
+         {"select_paths", "select_domains", "include_favicon"}),
+        (["map", "https://example.com", "--select-paths", "/docs/.*", "--select-domains", "docs\\.", "--no-external"],
+         {"select_paths", "select_domains", "allow_external"}),
+    ],
+)
+def test_oauth_still_sends_the_supported_crawl_and_map_arguments(oauth_posts: list[dict], args: list[str], sent_keys: set[str]) -> None:
+    result = run(*args, "--json")
+
+    assert result.exit_code == 0, result.output
+    assert sent_keys <= set(oauth_posts[0]["body"]["params"]["arguments"])
+
+
+@pytest.mark.parametrize("tool", sorted(COMMAND_MODULES))
+def test_every_argument_a_command_can_send_is_hosted_supported_or_guarded(tool: str) -> None:
+    source = (Path(__file__).resolve().parent.parent / "tavily_cli" / "commands" / COMMAND_MODULES[tool]).read_text()
+    sendable = set(re.findall(r'kwargs\["(\w+)"\]', source))
+    unguarded_unsupported = sendable - HOSTED_ACCEPTED[tool] - set(_API_KEY_ONLY_ARGUMENTS.get(tool, {}))
+
+    assert unguarded_unsupported == set(), f"{tool}: arguments the hosted tool does not accept and the guard does not stop"
+
+
+def test_guard_table_only_names_arguments_the_hosted_tools_do_not_accept() -> None:
+    for tool, table in _API_KEY_ONLY_ARGUMENTS.items():
+        for argument in table:
+            value_aware = table[argument][1] is not None
+            assert value_aware or argument not in HOSTED_ACCEPTED[tool], f"{tool}.{argument} is accepted by the hosted tool"
+
+
+# --- SSE framing -----------------------------------------------------------------------------------
+
+def _records(chunks) -> list[tuple[str | None, str]]:
+    return list(_sse_records(iter(chunks)))
+
+
+STREAM_BODY = ["event: x", "data: 1", "data: 2", "", "event: y", "data: 3", "", "event: done", ""]
+
+
+def _joined(ending: str) -> bytes:
+    return (ending.join(STREAM_BODY) + ending).encode()
+
+
+EXPECTED = [("x", "1\n2"), ("y", "3"), ("done", "")]
+
+
+@pytest.mark.parametrize("ending", ["\r\n", "\n", "\r"], ids=["crlf", "lf", "cr"])
+def test_records_are_identical_at_every_split_position(ending: str) -> None:
+    raw = _joined(ending)
+    assert _records([raw]) == EXPECTED
+    for position in range(len(raw) + 1):
+        assert _records([raw[:position], raw[position:]]) == EXPECTED, f"split at byte {position}"
+
+
+@pytest.mark.parametrize("ending", ["\r\n", "\n", "\r"], ids=["crlf", "lf", "cr"])
+def test_records_survive_single_byte_chunks(ending: str) -> None:
+    raw = _joined(ending)
+
+    assert _records([raw[i : i + 1] for i in range(len(raw))]) == EXPECTED
+
+
+def test_a_split_between_cr_and_lf_does_not_create_a_blank_line_inside_a_record() -> None:
+    chunks = [b"event: x\r\ndata: 1\r", b"\ndata: 2\r\n\r\n"]
+
+    assert _records(chunks) == [("x", "1\n2")]
+
+
+def test_trailing_cr_at_end_of_stream_terminates_the_final_record() -> None:
+    assert _records([b"event: done\r", b"\r"]) == [("done", "")]
+    assert _records([b"event: done\r\n\r"]) == [("done", "")]
+
+
+def test_cr_split_with_str_chunks_and_empty_chunks() -> None:
+    assert _records(["event: x\r", "", "\ndata: 1\r\n\r\n"]) == [("x", "1")]
+
+
+# --- Guard documentation ---------------------------------------------------------------------------
+
+def _command_options():
+    commands = {
+        "tavily_search": cli.commands["search"],
+        "tavily_extract": cli.commands["extract"],
+        "tavily_crawl": cli.commands["crawl"],
+        "tavily_map": cli.commands["map"],
+        "tavily_research": cli.commands["research"].commands["run"],
+    }
+    for tool, command in commands.items():
+        for param in command.params:
+            flags = [opt for opt in param.opts if opt.startswith("--")]
+            if flags and getattr(param, "help", None) is not None:
+                yield tool, flags[0], param.help
+
+
+def test_help_carries_the_marker_for_exactly_the_guarded_options() -> None:
+    checked = 0
+    for tool, flag, help_text in _command_options():
+        guarded = flag in guarded_flags(tool)
+        assert (OAUTH_MARKER in help_text) == guarded, f"{tool} {flag}: marker {'missing' if guarded else 'unexpected'}"
+        checked += 1
+    assert checked > 40
+
+
+def test_every_guarded_flag_exists_as_a_cli_option() -> None:
+    existing = {(tool, flag) for tool, flag, _ in _command_options()}
+    for tool in _API_KEY_ONLY_ARGUMENTS:
+        for flag in guarded_flags(tool):
+            assert (tool, flag) in existing, f"{tool} {flag} is guarded but is not a CLI option"
+
+
+def test_crawl_include_favicon_is_not_labelled_api_key_only() -> None:
+    helps = {flag: text for tool, flag, text in _command_options() if tool == "tavily_crawl"}
+
+    assert OAUTH_MARKER not in helps["--include-favicon"]
+    assert OAUTH_MARKER in helps["--include-images"]
+
+
+def test_readme_guard_list_matches_the_guard_table() -> None:
+    readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+    block = readme.split("<!-- oauth-guard:start -->\n", 1)[1].split("\n<!-- oauth-guard:end -->", 1)[0]
+
+    assert block == render_oauth_readme_block()
+
+
+def test_readme_option_tables_mark_exactly_the_guarded_options() -> None:
+    readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+    sections = {
+        "### `tvly search`": "tavily_search",
+        "### `tvly extract`": "tavily_extract",
+        "### `tvly crawl`": "tavily_crawl",
+        "### `tvly map`": "tavily_map",
+        "### `tvly research <query>` / `tvly research run <query>`": "tavily_research",
+    }
+    seen = {tool: set() for tool in sections.values()}
+    tool = None
+    for line in readme.splitlines():
+        if line.startswith("### "):
+            tool = sections.get(line)
+        row = re.match(r"^\| `(--[a-z-]+)`(?: / `--[a-z-]+`)? \| (.*) \|$", line)
+        if tool and row:
+            flag, description = row.groups()
+            seen[tool].add(flag)
+            guarded = flag in guarded_flags(tool)
+            assert (OAUTH_MARKER.rstrip(".") in description) == guarded, f"{tool} {flag}: README marker mismatch"
+    for tool, flags in seen.items():
+        for flag in guarded_flags(tool):
+            assert flag in flags, f"{tool} {flag}: guarded flag missing from the README table"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 
 import click
+
 from tavily import TavilyKeylessLimitError
 
 from tavily_cli.common import (
@@ -14,35 +15,36 @@ from tavily_cli.common import (
     handle_oauth_refresh_error,
     json_option,
 )
+from tavily_cli.mcp_client import oauth_option
 
 
 @click.command()
 @click.argument("query", required=False)
-@click.option("--depth", "search_depth", type=click.Choice(["ultra-fast", "fast", "basic", "advanced"]), default=None, help="Search depth (default: basic).")
-@click.option("--max-results", type=click.IntRange(0, 20), default=None, help="Maximum results, 0-20 (API default: 10).")
-@click.option("--topic", type=click.Choice(["general", "news", "finance"]), default=None, help="Search topic.")
-@click.option("--time-range", type=click.Choice(["day", "week", "month", "year"]), default=None, help="Relative time filter.")
-@click.option("--start-date", default=None, help="Results after date (YYYY-MM-DD).")
-@click.option("--end-date", default=None, help="Results before date (YYYY-MM-DD).")
-@click.option("--include-domains", default=None, help="Comma-separated domains to include.")
-@click.option("--exclude-domains", default=None, help="Comma-separated domains to exclude.")
-@click.option("--country", default=None, help="Boost results from country.")
-@click.option("--include-answer", is_flag=False, flag_value="basic", default=None, help="Include AI answer (pass 'basic' or 'advanced').")
-@click.option("--include-raw-content", is_flag=False, flag_value="markdown", default=None, help="Include full page content ('markdown' or 'text').")
-@click.option("--include-images", is_flag=True, default=False, help="Include image results.")
-@click.option("--include-image-descriptions", is_flag=True, default=False, help="Include AI image descriptions.")
-@click.option("--chunks-per-source", type=click.IntRange(1, 3), default=None, help="Chunks per source, 1-3 (basic, advanced and fast depth).")
-@click.option("--include-domains-mode", type=click.Choice(["prefer", "restrict"]), default=None, help="With --include-domains: prefer boosts them, restrict returns only those hosts and subdomains. API-key login only.")
-@click.option("--language", default=None, help="Boost results in this language (for example english). API-key login only.")
-@click.option("--filter-by-language", is_flag=True, default=False, help="Return only results in --language (requires --language). API-key login only.")
-@click.option("--safe-search", is_flag=True, default=False, help="Filter unsafe content (not available with fast or ultra-fast depth). API-key login only.")
-@click.option("--exact-match", is_flag=True, default=False, help="Require the quoted phrases in the query to match exactly.")
-@click.option("--auto-parameters", is_flag=True, default=False, help="Let Tavily choose search parameters from the query (may use advanced depth, 2 credits). API-key login only.")
-@click.option("--include-favicon", is_flag=True, default=False, help="Include each result's favicon URL.")
-@click.option("--include-usage", is_flag=True, default=False, help="Include credit usage in the response. API-key login only.")
-@click.option("--include-published-date", is_flag=True, default=False, help="Include published_date per result (beta). API-key login only.")
-@click.option("--filter-by-published-date", is_flag=True, default=False, help="Drop results outside the date window, including undated ones; implies --include-published-date. API-key login only.")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@oauth_option("tavily_search", "--depth", "search_depth", type=click.Choice(["ultra-fast", "fast", "basic", "advanced"]), default=None, help="Search depth (default: basic).")
+@oauth_option("tavily_search", "--max-results", type=click.IntRange(0, 20), default=None, help="Maximum results, 0-20 (API default: 10).")
+@oauth_option("tavily_search", "--topic", type=click.Choice(["general", "news", "finance"]), default=None, help="Search topic.")
+@oauth_option("tavily_search", "--time-range", type=click.Choice(["day", "week", "month", "year"]), default=None, help="Relative time filter.")
+@oauth_option("tavily_search", "--start-date", default=None, help="Results after date (YYYY-MM-DD).")
+@oauth_option("tavily_search", "--end-date", default=None, help="Results before date (YYYY-MM-DD).")
+@oauth_option("tavily_search", "--include-domains", default=None, help="Comma-separated domains to include.")
+@oauth_option("tavily_search", "--exclude-domains", default=None, help="Comma-separated domains to exclude.")
+@oauth_option("tavily_search", "--country", default=None, help="Boost results from country.")
+@oauth_option("tavily_search", "--include-answer", is_flag=False, flag_value="basic", default=None, help="Include AI answer (pass 'basic' or 'advanced').")
+@oauth_option("tavily_search", "--include-raw-content", is_flag=False, flag_value="markdown", default=None, help="Include full page content ('markdown' or 'text').")
+@oauth_option("tavily_search", "--include-images", is_flag=True, default=False, help="Include image results.")
+@oauth_option("tavily_search", "--include-image-descriptions", is_flag=True, default=False, help="Include AI image descriptions.")
+@oauth_option("tavily_search", "--chunks-per-source", type=click.IntRange(1, 3), default=None, help="Chunks per source, 1-3 (basic, advanced and fast depth).")
+@oauth_option("tavily_search", "--include-domains-mode", type=click.Choice(["prefer", "restrict"]), default=None, help="With --include-domains: prefer boosts them, restrict returns only those hosts and subdomains.")
+@oauth_option("tavily_search", "--language", default=None, help="Boost results in this language (for example english).")
+@oauth_option("tavily_search", "--filter-by-language", is_flag=True, default=False, help="Return only results in --language (requires --language).")
+@oauth_option("tavily_search", "--safe-search", is_flag=True, default=False, help="Filter unsafe content (not available with fast or ultra-fast depth).")
+@oauth_option("tavily_search", "--exact-match", is_flag=True, default=False, help="Require the quoted phrases in the query to match exactly.")
+@oauth_option("tavily_search", "--auto-parameters", is_flag=True, default=False, help="Let Tavily choose search parameters from the query (may use advanced depth, 2 credits).")
+@oauth_option("tavily_search", "--include-favicon", is_flag=True, default=False, help="Include each result's favicon URL.")
+@oauth_option("tavily_search", "--include-usage", is_flag=True, default=False, help="Include credit usage in the response.")
+@oauth_option("tavily_search", "--include-published-date", is_flag=True, default=False, help="Include published_date per result (beta).")
+@oauth_option("tavily_search", "--filter-by-published-date", is_flag=True, default=False, help="Drop results outside the date window, including undated ones; implies --include-published-date.")
+@oauth_option("tavily_search", "--output", "-o", "output_file", default=None, help="Save output to file.")
 @client_name_option
 @json_option
 def search(

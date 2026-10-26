@@ -410,28 +410,28 @@ skip authentication.
 |--------|-------------|
 | `--depth` | `ultra-fast`, `fast`, `basic` (default), `advanced` |
 | `--max-results` | Maximum results, 0-20 (API default: 10) |
-| `--topic` | `general` (default), `news`, `finance` |
+| `--topic` | `general` (default), `news`, `finance` (`finance`: API-key login only) |
 | `--time-range` | `day`, `week`, `month`, `year` |
 | `--start-date` | Results after date (YYYY-MM-DD) |
 | `--end-date` | Results before date (YYYY-MM-DD) |
 | `--include-domains` | Comma-separated domains to include |
 | `--exclude-domains` | Comma-separated domains to exclude |
 | `--country` | Boost results from country |
-| `--include-answer` | Include AI answer (`basic` or `advanced`) |
-| `--include-raw-content` | Include full page (`markdown` or `text`) |
+| `--include-answer` | Include AI answer (`basic` or `advanced`) (API-key login only) |
+| `--include-raw-content` | Include full page (`markdown` or `text`) (some values: API-key login only) |
 | `--include-images` | Include image results |
 | `--include-image-descriptions` | Include AI image descriptions |
-| `--chunks-per-source` | Chunks per source, 1-3 (basic, advanced and fast depth) |
-| `--include-domains-mode` | With `--include-domains`: `prefer` boosts them, `restrict` returns only those hosts and subdomains (API key) |
-| `--language` | Boost results in a language, for example `english` (API key) |
-| `--filter-by-language` | Return only results in `--language` (API key) |
-| `--safe-search` | Filter unsafe content; not with `fast`/`ultra-fast` (API key) |
+| `--chunks-per-source` | Chunks per source, 1-3 (basic, advanced and fast depth) (API-key login only) |
+| `--include-domains-mode` | With `--include-domains`: `prefer` boosts them, `restrict` returns only those hosts and subdomains (API-key login only) |
+| `--language` | Boost results in a language, for example `english` (API-key login only) |
+| `--filter-by-language` | Return only results in `--language` (API-key login only) |
+| `--safe-search` | Filter unsafe content; not with `fast`/`ultra-fast` (API-key login only) |
 | `--exact-match` | Require quoted phrases in the query to match exactly |
-| `--auto-parameters` | Let Tavily pick parameters from the query; may use advanced depth, 2 credits (API key) |
+| `--auto-parameters` | Let Tavily pick parameters from the query; may use advanced depth, 2 credits (API-key login only) |
 | `--include-favicon` | Include each result's favicon URL |
-| `--include-usage` | Include credit usage in the response (API key) |
-| `--include-published-date` | Include `published_date` per result, beta (API key) |
-| `--filter-by-published-date` | Drop results outside the date window, including undated ones (API key) |
+| `--include-usage` | Include credit usage in the response (API-key login only) |
+| `--include-published-date` | Include `published_date` per result, beta (API-key login only) |
+| `--filter-by-published-date` | Drop results outside the date window, including undated ones (API-key login only) |
 | `-o` / `--output` | Save output to file |
 | `--client-name` | Set optional `client_name` for request attribution |
 
@@ -455,13 +455,13 @@ automation can distinguish an available release from a supported self-update.
 | Option | Description |
 |--------|-------------|
 | `--query` | Rerank chunks by relevance |
-| `--chunks-per-source` | Chunks per source (1-5, requires `--query`) |
+| `--chunks-per-source` | Chunks per source (1-5, requires `--query`) (API-key login only) |
 | `--extract-depth` | `basic` (default) or `advanced` |
 | `--format` | `markdown` (default) or `text` |
 | `--include-images` | Include image URLs |
 | `--include-favicon` | Include each page's favicon URL |
-| `--include-usage` | Include credit usage in the response (API key) |
-| `--timeout` | Max wait (1-60 seconds; API default 10 basic, 30 advanced) |
+| `--include-usage` | Include credit usage in the response (API-key login only) |
+| `--timeout` | Max wait (1-60 seconds; API default 10 basic, 30 advanced) (API-key login only) |
 | `-o` / `--output` | Save output to file |
 | `--client-name` | Set optional `client_name` for request attribution |
 
@@ -473,18 +473,18 @@ automation can distinguish an available release from a supported self-update.
 | `--max-breadth` | Links per page (default: 20) |
 | `--limit` | Total pages cap (default: 50) |
 | `--instructions` | Natural language guidance |
-| `--chunks-per-source` | Chunks per page (1-5, requires `--instructions`) |
+| `--chunks-per-source` | Chunks per page (1-5, requires `--instructions`) (API-key login only) |
 | `--extract-depth` | `basic` or `advanced` |
 | `--format` | `markdown` or `text` |
 | `--select-paths` | Regex patterns for paths to include |
-| `--exclude-paths` | Regex patterns for paths to exclude |
+| `--exclude-paths` | Regex patterns for paths to exclude (API-key login only) |
 | `--select-domains` | Regex for domains to include |
-| `--exclude-domains` | Regex for domains to exclude |
+| `--exclude-domains` | Regex for domains to exclude (API-key login only) |
 | `--allow-external` | Include external links (default: true) |
-| `--include-images` | Include images |
+| `--include-images` | Include images (API-key login only) |
 | `--include-favicon` | Include each page's favicon URL |
-| `--include-usage` | Include credit usage in the response |
-| `--timeout` | Max wait (10-150 seconds) |
+| `--include-usage` | Include credit usage in the response (API-key login only) |
+| `--timeout` | Max wait (10-150 seconds) (API-key login only) |
 | `-o` / `--output` | Save JSON to file |
 | `--output-dir` | Save each page as .md file in directory |
 | `--client-name` | Set optional `client_name` for request attribution |
@@ -498,12 +498,12 @@ automation can distinguish an available release from a supported self-update.
 | `--limit` | Max URLs to discover (default: 50) |
 | `--instructions` | Natural language guidance |
 | `--select-paths` | Regex patterns for paths to include |
-| `--exclude-paths` | Regex patterns for paths to exclude |
+| `--exclude-paths` | Regex patterns for paths to exclude (API-key login only) |
 | `--select-domains` | Regex patterns for domains to include |
-| `--exclude-domains` | Regex patterns for domains to exclude |
+| `--exclude-domains` | Regex patterns for domains to exclude (API-key login only) |
 | `--allow-external` | Include external links |
-| `--include-usage` | Include credit usage in the response (API key) |
-| `--timeout` | Max wait (10-150 seconds) |
+| `--include-usage` | Include credit usage in the response (API-key login only) |
+| `--timeout` | Max wait (10-150 seconds) (API-key login only) |
 | `-o` / `--output` | Save output to file |
 | `--client-name` | Set optional `client_name` for request attribution |
 
@@ -513,9 +513,13 @@ automation can distinguish an available release from a supported self-update.
 |--------|-------------|
 | `--model` | `mini`, `pro`, or `auto` (default) |
 | `--no-wait` | Return request_id immediately |
-| `--stream` | Stream results in real-time |
-| `--output-schema` | Path to JSON schema file |
-| `--citation-format` | `numbered`, `mla`, `apa`, `chicago` |
+| `--stream` | Stream results in real-time (API-key login only) |
+| `--output-schema` | Path to JSON schema file (API-key login only) |
+| `--citation-format` | `numbered`, `mla`, `apa`, `chicago` (API-key login only) |
+| `--include-domains` | Comma-separated domains to prefer (soft preference, up to 20) (API-key login only) |
+| `--exclude-domains` | Comma-separated domains never to use (hard block, up to 20) (API-key login only) |
+| `--output-length` | `short`, `standard` or `long` (API-key login only) |
+| `--file` | Attach a `.txt`, `.md` or `.json` file as a source; repeat up to 5 times (API-key login only) |
 | `--poll-interval` | Seconds between checks (default: 10) |
 | `--timeout` | Max wait seconds (default: 600) |
 | `-o` / `--output` | Save output to file |
@@ -586,7 +590,15 @@ export TAVILY_HUMAN_ID=alice@example.com
 export TAVILY_CLIENT_NAME=my-integration
 ```
 
-Options marked "API key" are accepted by the Tavily API but not by the hosted MCP tools used with OAuth login (`tvly login`); with OAuth login the CLI stops and names the flag. Use `tvly login --api-key` to use them. `--include-usage` on `map` and `crawl` follows the same rule.
+Some options are accepted by the Tavily API but not by the hosted MCP tools used with OAuth login (`tvly login`). With OAuth login the CLI stops before sending the request and names the flag; their `--help` text ends with "API-key login only." Use `tvly login --api-key` to use them. Generated from the CLI's guard table (checked against the hosted tool schemas in source; not a statement about a deployed server):
+
+<!-- oauth-guard:start -->
+- `tvly search`: `--include-domains-mode`, `--language`, `--filter-by-language`, `--safe-search`, `--include-published-date`, `--filter-by-published-date`, `--include-usage`, `--auto-parameters`, `--chunks-per-source`, `--include-answer`, `--include-raw-content` (some values), `--topic` (only `finance`)
+- `tvly extract`: `--chunks-per-source`, `--timeout`, `--include-usage`
+- `tvly crawl`: `--chunks-per-source`, `--exclude-paths`, `--exclude-domains`, `--include-images`, `--timeout`, `--include-usage`
+- `tvly map`: `--exclude-paths`, `--exclude-domains`, `--timeout`, `--include-usage`
+- `tvly research run`: `--output-schema`, `--citation-format`, `--stream`, `--include-domains`, `--exclude-domains`, `--output-length`, `--file`
+<!-- oauth-guard:end -->
 
 ## Related
 

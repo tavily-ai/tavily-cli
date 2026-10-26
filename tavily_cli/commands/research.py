@@ -9,9 +9,11 @@ import sys
 import time
 
 import click
+
 from rich.markup import escape
 
 from tavily_cli.common import client_name_option, handle_api_error, sanitize_control
+from tavily_cli.mcp_client import oauth_option
 
 
 class ResearchGroup(click.Group):
@@ -145,15 +147,25 @@ def _sse_records(stream_resp):
                 data.append(line[5:].lstrip(" "))
         return event, "\n".join(data)
 
+    pending_cr = False  # a chunk ending in CR may be the first half of CRLF: hold it for the next chunk
+
+    def normalize(text: str, final: bool = False) -> str:
+        nonlocal pending_cr
+        if pending_cr:
+            text = "\r" + text
+            pending_cr = False
+        if text.endswith("\r") and not final:
+            text = text[:-1]
+            pending_cr = True
+        return re.sub(r"\r\n?", "\n", text)
+
     for raw_chunk in stream_resp:
-        buffer += decoder.decode(raw_chunk) if isinstance(raw_chunk, bytes) else raw_chunk
-        buffer = re.sub(r"\r\n?", "\n", buffer)
+        buffer += normalize(decoder.decode(raw_chunk) if isinstance(raw_chunk, bytes) else raw_chunk)
         while "\n\n" in buffer:
             record, buffer = buffer.split("\n\n", 1)
             if record.strip():
                 yield split(record)
-    buffer += decoder.decode(b"", final=True)
-    buffer = re.sub(r"\r\n?", "\n", buffer)
+    buffer += normalize(decoder.decode(b"", final=True), final=True)
     if buffer.strip():
         yield split(buffer)
 
@@ -238,19 +250,19 @@ def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
 
 @research.command()
 @click.argument("query", required=False)
-@click.option("--model", type=click.Choice(["mini", "pro", "auto"]), default=None, help="Research model (default: auto).")
-@click.option("--no-wait", is_flag=True, default=False, help="Return request_id immediately without waiting.")
-@click.option("--stream", is_flag=True, default=False, help="Stream results in real-time.")
-@click.option("--output-schema", default=None, help="Path to JSON schema file for structured output.")
-@click.option("--citation-format", type=click.Choice(["numbered", "mla", "apa", "chicago"]), default=None, help="Citation format.")
-@click.option("--include-domains", default=None, help="Comma-separated domains the research should prefer (soft preference, up to 20). API-key login only.")
-@click.option("--exclude-domains", default=None, help="Comma-separated domains never to use (hard block, up to 20). API-key login only.")
-@click.option("--output-length", type=click.Choice(["short", "standard", "long"]), default=None, help="Target report length (default: standard). API-key login only.")
-@click.option("--file", "files", multiple=True, type=click.Path(), help="Attach a .txt, .md or .json file as a source (repeat up to 5 times; 80,000 words max). API-key login only.")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
-@click.option("--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
-@click.option("--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
-@click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
+@oauth_option("tavily_research", "--model", type=click.Choice(["mini", "pro", "auto"]), default=None, help="Research model (default: auto).")
+@oauth_option("tavily_research", "--no-wait", is_flag=True, default=False, help="Return request_id immediately without waiting.")
+@oauth_option("tavily_research", "--stream", is_flag=True, default=False, help="Stream results in real-time.")
+@oauth_option("tavily_research", "--output-schema", default=None, help="Path to JSON schema file for structured output.")
+@oauth_option("tavily_research", "--citation-format", type=click.Choice(["numbered", "mla", "apa", "chicago"]), default=None, help="Citation format.")
+@oauth_option("tavily_research", "--include-domains", default=None, help="Comma-separated domains the research should prefer (soft preference, up to 20).")
+@oauth_option("tavily_research", "--exclude-domains", default=None, help="Comma-separated domains never to use (hard block, up to 20).")
+@oauth_option("tavily_research", "--output-length", type=click.Choice(["short", "standard", "long"]), default=None, help="Target report length (default: standard).")
+@oauth_option("tavily_research", "--file", "files", multiple=True, type=click.Path(), help="Attach a .txt, .md or .json file as a source (repeat up to 5 times; 80,000 words max).")
+@oauth_option("tavily_research", "--output", "-o", "output_file", default=None, help="Save output to file.")
+@oauth_option("tavily_research", "--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
+@oauth_option("tavily_research", "--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
+@oauth_option("tavily_research", "--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
 @client_name_option
 @click.pass_context
 def run(
@@ -414,7 +426,7 @@ def run(
 
 @research.command()
 @click.argument("request_id")
-@click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
+@oauth_option("tavily_research", "--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
 @client_name_option
 @click.pass_context
 def status(ctx: click.Context, request_id: str, json_flag: bool, client_name: str | None) -> None:
@@ -448,10 +460,10 @@ def status(ctx: click.Context, request_id: str, json_flag: bool, client_name: st
 
 @research.command()
 @click.argument("request_id")
-@click.option("--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
-@click.option("--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
-@click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
+@oauth_option("tavily_research", "--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
+@oauth_option("tavily_research", "--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
+@oauth_option("tavily_research", "--output", "-o", "output_file", default=None, help="Save output to file.")
+@oauth_option("tavily_research", "--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
 @client_name_option
 @click.pass_context
 def poll(
