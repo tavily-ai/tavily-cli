@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import click
+
 from tavily import TavilyKeylessLimitError
 
 from tavily_cli.common import (
@@ -12,17 +13,20 @@ from tavily_cli.common import (
     handle_oauth_refresh_error,
     json_option,
 )
+from tavily_cli.mcp_client import oauth_option
 
 
 @click.command()
 @click.argument("urls", nargs=-1, required=True)
-@click.option("--query", default=None, help="Rerank chunks by relevance to this query.")
-@click.option("--chunks-per-source", type=int, default=None, help="Chunks per source (1-5, requires --query).")
-@click.option("--extract-depth", type=click.Choice(["basic", "advanced"]), default=None, help="Extraction depth.")
-@click.option("--format", "fmt", type=click.Choice(["markdown", "text"]), default=None, help="Output format.")
-@click.option("--include-images", is_flag=True, default=False, help="Include image URLs.")
-@click.option("--timeout", type=float, default=None, help="Max wait time in seconds (1-60).")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@oauth_option("tavily_extract", "--query", default=None, help="Rerank chunks by relevance to this query.")
+@oauth_option("tavily_extract", "--chunks-per-source", type=click.IntRange(1, 5), default=None, help="Chunks per source (1-5, requires --query).")
+@oauth_option("tavily_extract", "--extract-depth", type=click.Choice(["basic", "advanced"]), default=None, help="Extraction depth.")
+@oauth_option("tavily_extract", "--format", "fmt", type=click.Choice(["markdown", "text"]), default=None, help="Output format.")
+@oauth_option("tavily_extract", "--include-images", is_flag=True, default=False, help="Include image URLs.")
+@oauth_option("tavily_extract", "--include-favicon", is_flag=True, default=False, help="Include each page's favicon URL.")
+@oauth_option("tavily_extract", "--include-usage", is_flag=True, default=False, help="Include credit usage in the response.")
+@oauth_option("tavily_extract", "--timeout", type=click.FloatRange(1, 60), default=None, help="Max wait time in seconds (1-60; API default 10 basic, 30 advanced).")
+@oauth_option("tavily_extract", "--output", "-o", "output_file", default=None, help="Save output to file.")
 @client_name_option
 @json_option
 def extract(
@@ -32,6 +36,8 @@ def extract(
     extract_depth: str | None,
     fmt: str | None,
     include_images: bool,
+    include_favicon: bool,
+    include_usage: bool,
     timeout: float | None,
     output_file: str | None,
     client_name: str | None,
@@ -51,6 +57,9 @@ def extract(
     if len(url_list) > 20:
         raise click.UsageError("Maximum 20 URLs per request.")
 
+    if chunks_per_source is not None and not query:
+        raise click.UsageError("--chunks-per-source requires --query.")
+
     kwargs: dict = {"urls": url_list}
     if query is not None:
         kwargs["query"] = query
@@ -62,6 +71,10 @@ def extract(
         kwargs["format"] = fmt
     if include_images:
         kwargs["include_images"] = True
+    if include_favicon:
+        kwargs["include_favicon"] = True
+    if include_usage:
+        kwargs["include_usage"] = True
     if timeout is not None:
         kwargs["timeout"] = timeout
 

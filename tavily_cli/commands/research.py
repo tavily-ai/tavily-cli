@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 import sys
 import time
 
 import click
+
 from rich.markup import escape
 
 from tavily_cli.common import client_name_option, handle_api_error, sanitize_control
+from tavily_cli.mcp_client import oauth_option
 
 
 class ResearchGroup(click.Group):
@@ -58,62 +62,187 @@ def _resolve_json(ctx: click.Context, local_flag: bool) -> bool:
     return False
 
 
+_FILE_TYPES = (".txt", ".md", ".json")
+_MAX_FILES = 5
+_MAX_WORDS = 80_000
+_MAX_DOMAINS = 20
+
+
+def _split_domains(value: str | None, flag: str) -> list[str] | None:
+    if not value:
+        return None
+    domains = [d.strip() for d in value.split(",") if d.strip()]
+    if len(domains) > _MAX_DOMAINS:
+        raise click.UsageError(f"{flag} accepts at most {_MAX_DOMAINS} domains.")
+    return domains or None
+
+
+def _read_files(paths: tuple[str, ...]) -> list[dict] | None:
+    """Encode --file arguments as the API's files entries (.txt/.md/.json, up to 5, 80,000 words)."""
+    if not paths:
+        return None
+    if len(paths) > _MAX_FILES:
+        raise click.UsageError(f"--file can be given at most {_MAX_FILES} times.")
+    entries: list[dict] = []
+    total_words = 0
+    for path in paths:
+        name = os.path.basename(path)
+        if not name.lower().endswith(_FILE_TYPES):
+            raise click.UsageError(f"--file {name}: supported types are {', '.join(_FILE_TYPES)}.")
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+        except OSError as e:
+            raise click.UsageError(f"--file {name}: {e.strerror or e}.")
+        words = len(raw.decode("utf-8", errors="replace").split())
+        total_words += words
+        if words > _MAX_WORDS:
+            raise click.UsageError(f"--file {name} has {words} words; the limit is {_MAX_WORDS} per file.")
+        entries.append({"name": name, "data": base64.b64encode(raw).decode("ascii"), "type": "base64"})
+    if total_words > _MAX_WORDS:
+        raise click.UsageError(f"--file contents total {total_words} words; the limit is {_MAX_WORDS} across all files.")
+    return entries
+
+
+def _create_research(client, kwargs: dict) -> dict:
+    """Create a research task. The API documents HTTP 201 for creation; tavily-python 0.8.x only
+    accepts 200 and then returns None, so 201 is normalised to 200 on this one call."""
+    session = getattr(client, "session", None)
+    if session is None or kwargs.get("stream"):
+        return client.research(**kwargs)
+    original = session.post
+
+    def post(url, *args, **kw):
+        response = original(url, *args, **kw)
+        if response.status_code == 201 and str(url).endswith("/research"):
+            response.status_code = 200
+        return response
+
+    session.post = post
+    try:
+        return client.research(**kwargs)
+    finally:
+        session.post = original
+
+
+def _sse_records(stream_resp):
+    """Yield (event, data_text) for each complete SSE record in a stream of bytes or str chunks.
+
+    Records are separated by a blank line; LF, CRLF and CR line endings are accepted and a record may be
+    split across transport chunks (or inside a multi-byte character). A final record without a trailing
+    blank line is still delivered at end of stream.
+    """
+    import codecs
+    import re
+
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    buffer = ""
+
+    def split(record: str):
+        event, data = None, []
+        for line in record.split("\n"):
+            if line.startswith("event:"):
+                event = line[6:].strip()
+            elif line.startswith("data:"):
+                data.append(line[5:].lstrip(" "))
+        return event, "\n".join(data)
+
+    pending_cr = False  # a chunk ending in CR may be the first half of CRLF: hold it for the next chunk
+
+    def normalize(text: str, final: bool = False) -> str:
+        nonlocal pending_cr
+        if pending_cr:
+            text = "\r" + text
+            pending_cr = False
+        if text.endswith("\r") and not final:
+            text = text[:-1]
+            pending_cr = True
+        return re.sub(r"\r\n?", "\n", text)
+
+    for raw_chunk in stream_resp:
+        buffer += normalize(decoder.decode(raw_chunk) if isinstance(raw_chunk, bytes) else raw_chunk)
+        while "\n\n" in buffer:
+            record, buffer = buffer.split("\n\n", 1)
+            if record.strip():
+                yield split(record)
+    buffer += normalize(decoder.decode(b"", final=True), final=True)
+    if buffer.strip():
+        yield split(buffer)
+
+
 def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
-    """Parse SSE stream chunks, show live status, then render with Rich like non-stream."""
+    """Parse the Research SSE stream, show live status, then render like a non-stream result.
+
+    The report is only rendered as completed when the terminal `event: done` frame arrived; an error
+    frame or a stream that ends early fails the command instead of presenting partial output.
+    """
     from tavily_cli.output import print_research_result
     from tavily_cli.theme import err_console
 
     content_parts: list[str] = []
+    structured = None
     sources: list[dict] = []
     current_step: str | None = None
+    done = False
 
-    for raw_chunk in stream_resp:
-        text = raw_chunk.decode("utf-8") if isinstance(raw_chunk, bytes) else raw_chunk
+    for event, data_text in _sse_records(stream_resp):
+        if event == "done":
+            done = True
+            break
+        try:
+            data = json.loads(data_text) if data_text else {}
+        except (json.JSONDecodeError, TypeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
 
-        for line in text.splitlines():
-            if not line.startswith("data:"):
-                continue
-            try:
-                data = json.loads(line[5:])
-            except (json.JSONDecodeError, TypeError):
-                continue
+        if event == "error" or data.get("object") == "error":
+            detail = data.get("error") or data_text or "unknown error"
+            raise click.ClickException(f"Research stream failed: {sanitize_control(str(detail))}")
 
-            delta = (data.get("choices") or [{}])[0].get("delta", {})
+        delta = (data.get("choices") or [{}])[0].get("delta", {})
 
-            # --- Tool calls: show live status updates ---
-            tool_calls = delta.get("tool_calls", {})
-            if tool_calls.get("type") == "tool_call":
-                for tc in tool_calls.get("tool_call", []):
-                    name = tc.get("name", "")
-                    args = tc.get("arguments", "")
-                    step = f"{name}: {args}" if args else name
-                    if step != current_step:
-                        current_step = step
-                        err_console.print(f"  [dim]{escape(sanitize_control(step))}[/dim]")
+        # --- Tool calls: show live status updates ---
+        tool_calls = delta.get("tool_calls", {})
+        if tool_calls.get("type") == "tool_call":
+            for tc in tool_calls.get("tool_call", []):
+                name = tc.get("name", "")
+                args = tc.get("arguments", "")
+                step = f"{name}: {args}" if args else name
+                if step != current_step:
+                    current_step = step
+                    err_console.print(f"  [dim]{escape(sanitize_control(step))}[/dim]")
 
-            if tool_calls.get("type") == "tool_response":
-                for tr in tool_calls.get("tool_response", []):
-                    name = tr.get("name", "")
-                    if name == "WebSearch":
-                        src_count = len(tr.get("sources", []))
-                        if src_count:
-                            err_console.print(f"  [dim]Found {src_count} sources[/dim]")
+        if tool_calls.get("type") == "tool_response":
+            for tr in tool_calls.get("tool_response", []):
+                name = tr.get("name", "")
+                if name == "WebSearch":
+                    src_count = len(tr.get("sources", []))
+                    if src_count:
+                        err_console.print(f"  [dim]Found {src_count} sources[/dim]")
 
-            # --- Content: collect the report text ---
-            content = delta.get("content")
+        # --- Content: collect the report text (structured output arrives as an object) ---
+        content = delta.get("content")
+        if isinstance(content, str):
             if content:
                 content_parts.append(content)
+        elif content is not None:
+            structured = content
 
-            # --- Sources: collect final source list ---
-            src_list = delta.get("sources")
-            if src_list:
-                sources = src_list
+        # --- Sources: collect final source list ---
+        src_list = delta.get("sources")
+        if src_list:
+            sources = src_list
 
-    # Render using the same formatter as non-stream output.
-    full_content = "".join(content_parts)
+    if not done:
+        raise click.ClickException(
+            "Research stream ended before the final 'done' event; the report may be incomplete. "
+            "Re-run, or use `tvly research run --no-wait` and `tvly research poll`."
+        )
+
     result = {
         "status": "completed",
-        "content": full_content,
+        "content": structured if structured is not None else "".join(content_parts),
         "sources": sources,
     }
     print_research_result(result, json_mode=False, output_file=output_file)
@@ -121,15 +250,19 @@ def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
 
 @research.command()
 @click.argument("query", required=False)
-@click.option("--model", type=click.Choice(["mini", "pro", "auto"]), default=None, help="Research model (default: auto).")
-@click.option("--no-wait", is_flag=True, default=False, help="Return request_id immediately without waiting.")
-@click.option("--stream", is_flag=True, default=False, help="Stream results in real-time.")
-@click.option("--output-schema", default=None, help="Path to JSON schema file for structured output.")
-@click.option("--citation-format", type=click.Choice(["numbered", "mla", "apa", "chicago"]), default=None, help="Citation format.")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
-@click.option("--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
-@click.option("--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
-@click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
+@oauth_option("tavily_research", "--model", type=click.Choice(["mini", "pro", "auto"]), default=None, help="Research model (default: auto).")
+@oauth_option("tavily_research", "--no-wait", is_flag=True, default=False, help="Return request_id immediately without waiting.")
+@oauth_option("tavily_research", "--stream", is_flag=True, default=False, help="Stream results in real-time.")
+@oauth_option("tavily_research", "--output-schema", default=None, help="Path to JSON schema file for structured output.")
+@oauth_option("tavily_research", "--citation-format", type=click.Choice(["numbered", "mla", "apa", "chicago"]), default=None, help="Citation format.")
+@oauth_option("tavily_research", "--include-domains", default=None, help="Comma-separated domains the research should prefer (soft preference, up to 20).")
+@oauth_option("tavily_research", "--exclude-domains", default=None, help="Comma-separated domains never to use (hard block, up to 20).")
+@oauth_option("tavily_research", "--output-length", type=click.Choice(["short", "standard", "long"]), default=None, help="Target report length (default: standard).")
+@oauth_option("tavily_research", "--file", "files", multiple=True, type=click.Path(), help="Attach a .txt, .md or .json file as a source (repeat up to 5 times; 80,000 words max).")
+@oauth_option("tavily_research", "--output", "-o", "output_file", default=None, help="Save output to file.")
+@oauth_option("tavily_research", "--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
+@oauth_option("tavily_research", "--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
+@oauth_option("tavily_research", "--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
 @client_name_option
 @click.pass_context
 def run(
@@ -140,6 +273,10 @@ def run(
     stream: bool,
     output_schema: str | None,
     citation_format: str | None,
+    include_domains: str | None,
+    exclude_domains: str | None,
+    output_length: str | None,
+    files: tuple[str, ...],
     output_file: str | None,
     poll_interval: int,
     timeout: int,
@@ -179,6 +316,17 @@ def run(
         kwargs["output_schema"] = schema
     if citation_format is not None:
         kwargs["citation_format"] = citation_format
+    domains_in = _split_domains(include_domains, "--include-domains")
+    domains_out = _split_domains(exclude_domains, "--exclude-domains")
+    if domains_in:
+        kwargs["include_domains"] = domains_in
+    if domains_out:
+        kwargs["exclude_domains"] = domains_out
+    if output_length is not None:
+        kwargs["output_length"] = output_length
+    file_entries = _read_files(files)
+    if file_entries:
+        kwargs["files"] = file_entries
 
     from tavily_cli.theme import err_console, spinner
 
@@ -192,19 +340,24 @@ def run(
                 # machine-parseable JSON and lets json.dumps escape any control
                 # characters in server content (raw bytes would otherwise reach
                 # the terminal as escape sequences).
-                for chunk in stream_resp:
-                    text = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
-                    for line in text.splitlines():
-                        if not line.startswith("data:"):
-                            continue
-                        payload = line[5:].strip()
-                        if not payload:
-                            continue
-                        try:
-                            event = json.loads(payload)
-                        except (json.JSONDecodeError, TypeError):
-                            continue
-                        click.echo(json.dumps(event, ensure_ascii=False))
+                done = False
+                for event_name, data_text in _sse_records(stream_resp):
+                    if event_name == "done":
+                        done = True
+                        break
+                    try:
+                        event = json.loads(data_text) if data_text else None
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if event is None:
+                        continue
+                    click.echo(json.dumps(event, ensure_ascii=False))
+                    if event_name == "error" or (isinstance(event, dict) and event.get("object") == "error"):
+                        raise click.ClickException("Research stream failed: see the error event above.")
+                if not done:
+                    raise click.ClickException(
+                        "Research stream ended before the final 'done' event; the output may be incomplete."
+                    )
             else:
                 _render_stream(stream_resp, output_file=output_file)
         except Exception as e:
@@ -213,7 +366,7 @@ def run(
 
     try:
         with spinner("Starting research...", json_mode=json_mode):
-            result = client.research(**kwargs)
+            result = _create_research(client, kwargs)
     except Exception as e:
         handle_api_error(e, json_mode)
 
@@ -273,7 +426,7 @@ def run(
 
 @research.command()
 @click.argument("request_id")
-@click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
+@oauth_option("tavily_research", "--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
 @client_name_option
 @click.pass_context
 def status(ctx: click.Context, request_id: str, json_flag: bool, client_name: str | None) -> None:
@@ -307,10 +460,10 @@ def status(ctx: click.Context, request_id: str, json_flag: bool, client_name: st
 
 @research.command()
 @click.argument("request_id")
-@click.option("--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
-@click.option("--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
-@click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
+@oauth_option("tavily_research", "--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
+@oauth_option("tavily_research", "--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
+@oauth_option("tavily_research", "--output", "-o", "output_file", default=None, help="Save output to file.")
+@oauth_option("tavily_research", "--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
 @client_name_option
 @click.pass_context
 def poll(

@@ -274,6 +274,21 @@ def get_human_id() -> str | None:
     return _read_config().get("human_id")
 
 
+def get_client_name(explicit: str | None = None) -> str | None:
+    """Resolve client_name with precedence: --client-name flag > TAVILY_CLIENT_NAME env var > config file.
+
+    client_name identifies the integration or partner using the CLI (sent as X-Client-Name on both the
+    API-key and OAuth paths). Returns None when unset, in which case no header is sent.
+    """
+    if explicit:
+        return explicit
+    value = os.environ.get("TAVILY_CLIENT_NAME")
+    if value and value.strip():
+        return value.strip()
+    configured = _read_config().get("client_name")
+    return configured.strip() if isinstance(configured, str) and configured.strip() else None
+
+
 def get_api_base_url() -> str | None:
     """Resolve an optional API base URL with precedence: env var > config file."""
     value = os.environ.get("TAVILY_API_BASE_URL")
@@ -535,6 +550,7 @@ def get_client(client_name: str | None = None, *, json_mode: bool = False):
 def _build_keyed_client(key: str, client_name: str | None = None):
     """Build a keyed Tavily client (SDK or MCP) for the given credential."""
     human_id = get_human_id()
+    client_name = get_client_name(client_name)
     if is_oauth_token(key):
         from tavily_cli.mcp_client import McpTavilyClient
         return McpTavilyClient(
@@ -565,7 +581,7 @@ def get_client_or_keyless(client_name: str | None = None):
             session_id=SESSION_ID,
             human_id=get_human_id(),
             client_source="tavily-cli-keyless",
-            client_name=client_name,
+            client_name=get_client_name(client_name),
             api_base_url=get_api_base_url(),
         ),
         True,
