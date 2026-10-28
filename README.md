@@ -9,7 +9,7 @@ CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, ex
 
 - **One-Command Setup** — Authenticate, install Tavily skills for supported agents, and verify a live search
 - **Interactive REPL** — Run `tvly` with no arguments for a chat-like shell experience
-- **CLI for Humans & AI Agents** — Rich-formatted output for humans, `--json` for agents
+- **CLI for Humans & AI Agents** — Rich-formatted output in a terminal, plain text when piped or run by an agent, and `--json` for structured output
 - **Web Search** — LLM-optimized search with domain/date filtering and relevance scoring
 - **Content Extraction** — Extract clean markdown from any URL
 - **Website Crawling** — Crawl sites with depth/breadth control and path filtering
@@ -197,7 +197,13 @@ tvly search "quantum computing" --depth advanced --max-results 10 --time-range w
 # Search specific domains
 tvly search "SEC filings for Apple" --include-domains sec.gov,reuters.com
 
-# JSON output for agents
+# Several queries at once, run in parallel with the same options
+tvly search "Rust 2024 edition release date" "Rust 1.85 release notes" --depth advanced
+
+# Longer snippets (0 prints each result's content whole)
+tvly search "AI news" --max-chars 1500
+
+# JSON output
 tvly search "AI news" --json
 
 # Set client_name for attribution
@@ -281,14 +287,33 @@ tvly feedback --request-id REQUEST_ID --agent-score 0.9 \
 tvly feedback --session-id SESSION_ID --agent-score 1 --response-delivered "..." --used-ids '["r1", "r3"]'
 ```
 
+### Output in Pipes and Agent Shells
+
+When stdout is not a terminal, such as in a pipe, a redirect or a coding agent's
+shell, commands print plain text with no styling or line wrapping:
+
+- `search` prints each result's title, full URL and the first 600 characters of
+  its content on one line. `--max-chars` changes the length, and `0` prints the
+  content whole. Several queries in one command share the 600 characters.
+- `extract` and `crawl` print each page in full, as `# <url>` followed by its
+  content, with links kept.
+- `map` prints one URL per line, and `research` prints the report followed by
+  its sources.
+
+`--json` output is unchanged.
+
 ### Save Results
 
 `--output` writes the structured JSON response, regardless of the filename
-extension. For extraction, `--format markdown` controls the content inside
-that response; it does not turn the output file into plain Markdown.
+extension, and creates the folder if it doesn't exist. A new `.tavily/` folder
+gets its own `.gitignore`, so saved results stay out of git. When stdout is not
+a terminal, `search --output` still prints the results, so you can skim them and
+read the saved file for more. For extraction, `--format markdown` controls the
+content inside that response; it does not turn the output file into plain
+Markdown.
 
 ```bash
-tvly search "AI news" --output results.json
+tvly search "AI news" --output .tavily/ai-news.json
 tvly extract https://example.com --format markdown --output extracted.json
 
 # Save individual crawled pages as Markdown files
@@ -411,8 +436,14 @@ skip authentication.
 | `--include-images` | Include image results |
 | `--include-image-descriptions` | Include AI image descriptions |
 | `--chunks-per-source` | Chunks per source (advanced/fast depth only) |
-| `-o` / `--output` | Save output to file |
+| `--max-chars` | Characters of each result's content to print (default 600, shared across queries; `0` for all) |
+| `-o` / `--output` | Save the full JSON response to file |
 | `--client-name` | Set optional `client_name` for request attribution |
+
+`tvly search` accepts up to 5 queries and runs them in parallel with the same
+options. Each query's results print under its own `=== [i/n] <query>` header;
+with `--json`, the output is a list of responses in query order. A query that
+fails reports its error without stopping the others.
 
 ### `tvly update`
 
