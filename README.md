@@ -15,7 +15,6 @@ CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, ex
 - **Website Crawling** — Crawl sites with depth/breadth control and path filtering
 - **URL Discovery** — Map all URLs on a site without content extraction
 - **Deep Research** — AI-powered research with citations and structured output
-- **Feedback** — Score search results and share request or session feedback
 - **Self-Update** — Check for and install CLI updates through the original package manager
 
 ## Installation
@@ -130,8 +129,8 @@ tvly extract https://example.com
 ```
 
 If you reach the cap, the CLI prints continuation options. Run `tvly login`
-to authenticate, then retry your command. `crawl`, `map`, `research`, and
-`feedback` require authentication.
+to authenticate, then retry your command. `crawl`, `map`, and `research`
+require authentication.
 
 ### Manage authentication
 
@@ -273,20 +272,6 @@ tvly research poll REQUEST_ID --json          # wait and get result
 tvly research "AI market size" --output-schema schema.json --json
 ```
 
-### Submit Feedback
-
-Replace `REQUEST_ID`, `SESSION_ID`, and the example result IDs with values
-from your requests.
-
-```bash
-# Score a search request overall and per result
-tvly feedback --request-id REQUEST_ID --agent-score 0.9 \
-  --urls-scores '[{"id": "r1", "agent_score": 0.9}, {"id": "r2", "agent_score": 0.2, "comment": "outdated"}]'
-
-# Feedback on a whole session, with the answer you produced
-tvly feedback --session-id SESSION_ID --agent-score 1 --response-delivered "..." --used-ids '["r1", "r3"]'
-```
-
 ### Output in Pipes and Agent Shells
 
 When stdout is not a terminal, such as in a pipe, a redirect or a coding agent's
@@ -344,7 +329,6 @@ tvly
 │   ├── run <query>             # Start a research task (same as above)
 │   ├── status <id>             # Check task status
 │   └── poll <id>               # Poll until completion
-└── feedback                    # Submit feedback on a request or session
 ```
 
 ## Non-Interactive Mode (for AI Agents & Scripts)
@@ -537,25 +521,6 @@ Check research task status by request ID. Supports `--client-name`.
 ### `tvly research poll`
 
 Poll until completion and return results. Same `--poll-interval`, `--timeout`, `-o`, and `--client-name` options as `run`.
-
-### `tvly feedback`
-
-Requires `--session-id` or `--request-id`. Requires a Tavily API key.
-
-| Option | Description |
-|--------|-------------|
-| `--session-id` | Session to give feedback on |
-| `--request-id` | Search request to give feedback on |
-| `--agent-score` | Overall score: 1 perfect, 0 irrelevant, -1 harmful |
-| `--human-score` | End-user feedback, if available (e.g. like/dislike) |
-| `--comment` | Explanation, required when `--agent-score` is below 0.5 |
-| `--response-delivered` | The final answer you produced using the results |
-| `--used-urls` | URLs you actually used: JSON array of strings, inline or a file path |
-| `--used-ids` | Result IDs you actually used: JSON array of strings, inline or a file path |
-| `--used-citations` | Content snippets you used: JSON array of strings, inline or a file path |
-| `--urls-scores` | Per-result feedback: JSON array of `{id\|url, agent_score, scores, comment}`, inline or a file path |
-| `--extra-scores` | Additional labeled scores: JSON array of `{label, value}`, inline or a file path |
-| `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly set-default` / `tvly unset-default`
 

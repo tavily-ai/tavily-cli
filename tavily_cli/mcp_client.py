@@ -151,6 +151,3 @@ class McpTavilyClient:
 
     def get_research(self, request_id: str) -> dict:
         return self._call("tavily_get_research", {"request_id": request_id})
-
-    def feedback(self, **kwargs: Any) -> dict:
-        return self._call("tavily_feedback", kwargs)
