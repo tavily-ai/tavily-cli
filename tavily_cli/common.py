@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 import re
+import time
 
 import click
 from tavily import TavilyKeylessLimitError
@@ -95,6 +97,30 @@ def handle_oauth_refresh_error(e: Exception, json_mode: bool) -> None:
 
     err_console.print(f"  [#FAA2FB]> OAuth refresh failed:[/#FAA2FB] {escape(message)}")
     raise SystemExit(3)
+
+
+DEFAULT_OUTPUT_DIR = ".tavily"
+
+
+def output_option(func):
+    """Add -o/--output. With a path it saves the full JSON response there; with no value it picks a path under
+    .tavily/ (see resolve_output)."""
+    return click.option(
+        "--output", "-o", "output_file", is_flag=False, flag_value="", default=None,
+        help="Save the full JSON response to this file. With no value, save it under .tavily/ with a generated name.",
+    )(func)
+
+
+def resolve_output(output_file: str | None, command: str, label: object) -> str | None:
+    """Turn a bare -o into .tavily/<command>-<label>-<time>.json; leave a given path or no -o as it is."""
+    if output_file != "":
+        return output_file
+    slug = "-".join(re.findall(r"[a-z0-9]+", str(label).lower()))[:40].strip("-") or "result"
+    base = os.path.join(DEFAULT_OUTPUT_DIR, f"{command}-{slug}-{time.strftime('%H%M%S')}")
+    path, n = f"{base}.json", 2
+    while os.path.exists(path):
+        path, n = f"{base}-{n}.json", n + 1
+    return path
 
 
 def json_option(func):

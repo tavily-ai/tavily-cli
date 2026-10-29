@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 import click
 from tavily import TavilyKeylessLimitError
 
@@ -11,6 +13,8 @@ from tavily_cli.common import (
     handle_keyless_cap_hit,
     handle_oauth_refresh_error,
     json_option,
+    output_option,
+    resolve_output,
 )
 
 
@@ -22,7 +26,7 @@ from tavily_cli.common import (
 @click.option("--format", "fmt", type=click.Choice(["markdown", "text"]), default=None, help="Output format.")
 @click.option("--include-images", is_flag=True, default=False, help="Include image URLs.")
 @click.option("--timeout", type=float, default=None, help="Max wait time in seconds (1-60).")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@output_option
 @client_name_option
 @json_option
 def extract(
@@ -46,6 +50,8 @@ def extract(
     """
     from tavily_cli.config import get_client_or_keyless
     from tavily_cli.output import print_extract_results
+
+    output_file = resolve_output(output_file, "extract", urlparse(urls[0]).netloc)
 
     url_list = list(urls)
     if len(url_list) > 20:

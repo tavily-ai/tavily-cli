@@ -202,3 +202,49 @@ def test_new_tavily_folder_ignores_itself(piped, tmp_path):
     other = tmp_path / "out" / "r.json"
     output.print_search_results({"results": []}, json_mode=True, output_file=str(other))
     assert not (tmp_path / "out" / ".gitignore").exists()
+
+
+def test_bare_output_saves_under_tavily_folder(fake_client, tmp_path, monkeypatch):
+    from click.testing import CliRunner
+
+    from tavily_cli.cli import cli
+
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(cli, ["search", "Rust 2024 edition", "-o"])
+    assert result.exit_code == 0, result.output
+    saved = list((tmp_path / ".tavily").glob("search-rust-2024-edition-*.json"))
+    assert len(saved) == 1 and json.loads(saved[0].read_text())["results"]
+    assert (tmp_path / ".tavily" / ".gitignore").read_text() == "*\n"
+    assert "1. T Rust 2024 edition" in result.output  # still prints the results when piped
+
+
+def test_explicit_output_path_is_unchanged(fake_client, tmp_path, monkeypatch):
+    from click.testing import CliRunner
+
+    from tavily_cli.cli import cli
+
+    monkeypatch.chdir(tmp_path)
+    CliRunner().invoke(cli, ["search", "q", "-o", "out.json"])
+    assert (tmp_path / "out.json").exists() and not (tmp_path / ".tavily").exists()
+
+
+def test_no_output_flag_writes_nothing(fake_client, tmp_path, monkeypatch):
+    from click.testing import CliRunner
+
+    from tavily_cli.cli import cli
+
+    monkeypatch.chdir(tmp_path)
+    CliRunner().invoke(cli, ["search", "q"])
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_generated_names_do_not_collide(tmp_path, monkeypatch):
+    from tavily_cli.common import resolve_output
+
+    monkeypatch.chdir(tmp_path)
+    first = resolve_output("", "extract", "docs.example.com")
+    assert first.startswith(".tavily/extract-docs-example-com-") and first.endswith(".json")
+    (tmp_path / ".tavily").mkdir()
+    (tmp_path / first).write_text("{}")
+    assert resolve_output("", "extract", "docs.example.com") != first
+    assert resolve_output(None, "search", "q") is None and resolve_output("x.json", "search", "q") == "x.json"

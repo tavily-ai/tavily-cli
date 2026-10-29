@@ -14,6 +14,8 @@ from tavily_cli.common import (
     handle_keyless_cap_hit,
     handle_oauth_refresh_error,
     json_option,
+    output_option,
+    resolve_output,
 )
 
 MAX_QUERIES = 5
@@ -36,7 +38,7 @@ DEFAULT_CHARS = 600
 @click.option("--include-images", is_flag=True, default=False, help="Include image results.")
 @click.option("--include-image-descriptions", is_flag=True, default=False, help="Include AI image descriptions.")
 @click.option("--chunks-per-source", type=int, default=None, help="Chunks per source (advanced/fast depth only).")
-@click.option("--output", "-o", "output_file", default=None, help="Save the full JSON response to file.")
+@output_option
 @click.option("--max-chars", type=click.IntRange(min=0), default=None, help="Characters of each result's content to print (default 600, shared across queries: 300 each for 2, 200 for 3); 0 prints it whole. --json and -o files keep it whole.")
 @client_name_option
 @json_option
@@ -79,6 +81,8 @@ def search(
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
     if len(queries) > MAX_QUERIES:
         raise click.UsageError(f"At most {MAX_QUERIES} queries per command, got {len(queries)}.")
+
+    output_file = resolve_output(output_file, "search", queries[0])
 
     if max_chars is None:
         # One search's worth of text per command, however many queries it holds.
