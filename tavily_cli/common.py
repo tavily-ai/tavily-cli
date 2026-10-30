@@ -6,6 +6,7 @@ import functools
 import json
 import os
 import re
+import secrets
 import time
 
 import click
@@ -41,20 +42,28 @@ class TavilyAPIError(Exception):
         self.docs = docs
 
 
+def keyless_cap_error(e: TavilyKeylessLimitError) -> dict:
+    """The structured JSON error for a keyless rate-limit cap-hit."""
+    return {
+        "code": e.code,
+        "message": e.message,
+        "window": e.window,
+        "retry_after_seconds": e.retry_after_seconds,
+        "next_actions": e.next_actions,
+    }
+
+
 def handle_keyless_cap_hit(e: TavilyKeylessLimitError, json_mode: bool) -> None:
     """Render a keyless rate-limit cap-hit and exit non-zero."""
     if json_mode:
-        click.echo(json.dumps({
-            "error": {
-                "code": e.code,
-                "message": e.message,
-                "window": e.window,
-                "retry_after_seconds": e.retry_after_seconds,
-                "next_actions": e.next_actions,
-            }
-        }))
+        click.echo(json.dumps({"error": keyless_cap_error(e)}))
         raise SystemExit(3)
+    print_keyless_cap_hit(e)
+    raise SystemExit(3)
 
+
+def print_keyless_cap_hit(e: TavilyKeylessLimitError) -> None:
+    """Print the keyless cap-hit message, retry delay, continuation options and login hint to stderr."""
     from tavily_cli.theme import err_console
 
     block = format_keyless_envelope_for_terminal(
@@ -76,7 +85,6 @@ def handle_keyless_cap_hit(e: TavilyKeylessLimitError, json_mode: bool) -> None:
         "and remove this cap.[/dim]"
     )
     err_console.print()
-    raise SystemExit(3)
 
 
 def handle_oauth_refresh_error(e: Exception, json_mode: bool) -> None:
@@ -112,15 +120,14 @@ def output_option(func):
 
 
 def resolve_output(output_file: str | None, command: str, label: object) -> str | None:
-    """Turn a bare -o into .tavily/<command>-<label>-<time>.json; leave a given path or no -o as it is."""
+    """Turn a bare -o into .tavily/<command>-<label>-<time>-<random>.json; leave a given path or no -o as it is.
+
+    The name is picked before the request runs, so the random suffix keeps overlapping commands from
+    choosing the same file and overwriting each other."""
     if output_file != "":
         return output_file
     slug = "-".join(re.findall(r"[a-z0-9]+", str(label).lower()))[:40].strip("-") or "result"
-    base = os.path.join(DEFAULT_OUTPUT_DIR, f"{command}-{slug}-{time.strftime('%H%M%S')}")
-    path, n = f"{base}.json", 2
-    while os.path.exists(path):
-        path, n = f"{base}-{n}.json", n + 1
-    return path
+    return os.path.join(DEFAULT_OUTPUT_DIR, f"{command}-{slug}-{time.strftime('%H%M%S')}-{secrets.token_hex(3)}.json")
 
 
 def json_option(func):

@@ -14,7 +14,9 @@ from tavily_cli.common import (
     handle_keyless_cap_hit,
     handle_oauth_refresh_error,
     json_option,
+    keyless_cap_error,
     output_option,
+    print_keyless_cap_hit,
     resolve_output,
 )
 
@@ -129,17 +131,24 @@ def search(
         except Exception as e:
             handle_api_error(e, json_output)
 
+        cap_hits: list[TavilyKeylessLimitError] = []
+
         def run(q: str) -> dict:
             try:
                 return client.search(query=q, **kwargs)
+            except TavilyKeylessLimitError as e:  # keep the code, retry delay and next actions
+                cap_hits.append(e)
+                return {"query": q, "error": keyless_cap_error(e)}
             except Exception as e:  # one failed query must not lose the others' results
                 return {"query": q, "error": str(e)}
 
         with spinner("Searching...", json_mode=json_output), ThreadPoolExecutor(len(queries)) as pool:
             responses = list(pool.map(run, queries))
         print_multi_search_results(responses, json_mode=json_output, output_file=output_file, max_chars=max_chars)
+        if cap_hits and not json_output:
+            print_keyless_cap_hit(cap_hits[0])
         if all("error" in r for r in responses):
-            raise SystemExit(4)
+            raise SystemExit(3 if cap_hits else 4)
         return
 
     try:

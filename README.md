@@ -292,7 +292,7 @@ shell, commands print plain text with no styling or line wrapping:
 `--output` writes the structured JSON response, regardless of the filename
 extension, and creates the folder if it doesn't exist. With no value, `-o`
 saves under `.tavily/` with a generated name, such as
-`.tavily/search-ai-news-142310.json`, and prints the path. A new `.tavily/`
+`.tavily/search-ai-news-142310-3f9a1c.json`, and prints the path. A new `.tavily/`
 folder gets its own `.gitignore`, so saved results stay out of git. Nothing is
 saved without `-o`. When stdout is not
 a terminal, `search --output` still prints the results, so you can skim them and

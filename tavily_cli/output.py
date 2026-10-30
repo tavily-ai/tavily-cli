@@ -243,7 +243,8 @@ def print_multi_search_results(
         else:
             click.echo(header)
         if "error" in r:
-            click.echo(f"error: {_plain(r['error'])}\n")
+            error = r["error"]
+            click.echo(f"error: {_plain(error['message'] if isinstance(error, dict) else error)}\n")
         else:
             print_search_results(r, json_mode=False, max_chars=max_chars)
 

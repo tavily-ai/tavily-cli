@@ -101,6 +101,30 @@ def test_multi_query_runs_each_with_shared_options(fake_client):
     assert lines[0] == "=== [1/2] one" and lines[1] == "1. T one" and "=== [2/2] two" in lines
 
 
+def test_multi_query_keeps_keyless_cap_details(fake_client, monkeypatch):
+    from tavily import TavilyKeylessLimitError
+
+    def search(query, **kwargs):
+        if query == "capped":
+            raise TavilyKeylessLimitError("Keyless limit reached", code="keyless_cap", retry_after_seconds=60,
+                                          next_actions=[{"type": "login"}])
+        return {"query": query, "results": []}
+
+    monkeypatch.setattr(fake_client, "search", search)
+    result = CliRunner().invoke(cli, ["search", "ok", "capped", "--json"])
+    error = json.loads(result.output)[1]["error"]
+    assert error["code"] == "keyless_cap" and error["retry_after_seconds"] == 60 and error["next_actions"]
+    result = CliRunner().invoke(cli, ["search", "capped", "capped"])
+    assert result.exit_code == 3 and "tvly login" in result.output
+
+
+def test_generated_names_differ_within_the_same_second(tmp_path, monkeypatch):
+    from tavily_cli.common import resolve_output
+
+    monkeypatch.chdir(tmp_path)
+    assert resolve_output("", "search", "q") != resolve_output("", "search", "q")
+
+
 def test_bare_output_saves_under_tavily_folder(fake_client, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(cli, ["search", "Rust 2024 edition", "-o"])
