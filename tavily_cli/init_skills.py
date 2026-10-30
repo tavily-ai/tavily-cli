@@ -28,12 +28,7 @@ class AgentSpec:
 @dataclass(frozen=True)
 class SkillsInstallResult:
     agents: tuple[str, ...]
-    installed: int
-    updated: int
-
-    @property
-    def restart_required(self) -> bool:
-        return self.installed > 0 or self.updated > 0
+    restart_required: bool
 
 
 def agent_specs(home: Path | None = None) -> dict[str, AgentSpec]:
@@ -90,17 +85,13 @@ def install_agent_skills(agents: tuple[str, ...]) -> SkillsInstallResult:
         detail = (completed.stderr or completed.stdout).strip().splitlines()
         raise RuntimeError(f"npx skills failed: {detail[-1] if detail else f'exit code {completed.returncode}'}")
 
-    after = _snapshot_skills(skill_dirs)
-    return SkillsInstallResult(
-        agents=agents,
-        installed=sum(1 for name in after if name not in before),
-        updated=sum(1 for name in after if name in before and before[name] != after[name]),
-    )
+    return SkillsInstallResult(agents=agents, restart_required=_snapshot_skills(skill_dirs) != before)
 
 
-def _snapshot_skills(skill_dirs: tuple[Path, ...]) -> dict[str, str]:
+def _snapshot_skills(skill_dirs: tuple[Path, ...]) -> dict[Path, str]:
+    # Key by path so a new agent link to an existing shared skill counts as a change.
     return {
-        path.name: _directory_digest(path)
+        path: _directory_digest(path)
         for skill_dir in skill_dirs
         if skill_dir.is_dir()
         for path in skill_dir.iterdir()

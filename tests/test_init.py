@@ -66,19 +66,36 @@ def test_agent_skills_install_runs_npx(tmp_path: Path, monkeypatch: pytest.Monke
     assert command[command.index("--agent") + 1 : command.index("--agent") + 4] == list(agents)
     assert "--global" in command and command.count("--yes") == 2
     assert all(" " not in arg and '"' not in arg for arg in command)
-    assert first.installed == len(SKILLS)
     assert first.restart_required
 
     second = install_agent_skills(agents)
 
-    assert second.installed == 0
-    assert second.updated == 0
     assert not second.restart_required
 
     monkeypatch.setattr(init_skills_module.subprocess, "run", _fake_npx_install(tmp_path, calls, content="new"))
     third = install_agent_skills(agents)
 
-    assert third.updated == len(SKILLS)
+    assert third.restart_required
+
+
+def test_agent_skills_install_counts_new_agent_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.setattr(init_skills_module.shutil, "which", lambda name: "/usr/bin/npx")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(init_skills_module.subprocess, "run", _fake_npx_install(tmp_path, calls))
+    install_agent_skills(("codex",))
+
+    def link_skills(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        for skill_name in SKILLS:
+            link = tmp_path / ".claude" / "skills" / skill_name
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.symlink_to(tmp_path / ".agents" / "skills" / skill_name, target_is_directory=True)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(init_skills_module.subprocess, "run", link_skills)
+
+    assert install_agent_skills(("claude-code", "codex")).restart_required
 
 
 def test_agent_skills_install_requires_npx(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,7 +132,7 @@ def test_init_json_reuses_environment_auth(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         init_module,
         "install_agent_skills",
-        lambda agents: SkillsInstallResult(agents, 3, 0),
+        lambda agents: SkillsInstallResult(agents, True),
     )
     monkeypatch.setattr(init_module, "_verify_cli", lambda: True)
     monkeypatch.setattr(init_module, "_verify_live_search", lambda: True)
@@ -127,7 +144,7 @@ def test_init_json_reuses_environment_auth(monkeypatch: pytest.MonkeyPatch) -> N
     assert output["ok"] is True
     assert output["auth"] == {"authenticated": True, "method": "env"}
     assert output["skills"]["agents"] == ["codex"]
-    assert output["skills"]["installed"] == 3
+    assert output["skills"]["restart_required"] is True
     assert output["skills"]["source"] == "tavily-ai/skills"
     assert output["verification"]["live_search"] is True
 

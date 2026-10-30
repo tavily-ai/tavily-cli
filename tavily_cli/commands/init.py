@@ -68,11 +68,7 @@ def init_command(
     if not result["skills"]["skipped"]:
         try:
             skills_result = install_agent_skills(selected_agents)
-            result["skills"].update({
-                "installed": skills_result.installed,
-                "updated": skills_result.updated,
-                "restart_required": skills_result.restart_required,
-            })
+            result["skills"]["restart_required"] = skills_result.restart_required
         except Exception as exc:
             _fail(result, "skills", str(exc), 1, json_output)
             return
@@ -182,8 +178,6 @@ def _empty_result(agents: tuple[str, ...]) -> dict[str, Any]:
         "skills": {
             "source": SKILLS_REPO,
             "agents": list(agents),
-            "installed": 0,
-            "updated": 0,
             "restart_required": False,
             "skipped": False,
         },
