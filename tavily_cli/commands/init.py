@@ -12,14 +12,7 @@ import click
 
 from tavily_cli import __version__
 from tavily_cli.common import json_option
-from tavily_cli.init_skills import (
-    SKILLS_REPO,
-    SKILLS_SOURCE,
-    agent_specs,
-    detect_agents,
-    install_agent_skills,
-    verify_skills,
-)
+from tavily_cli.init_skills import SKILLS_REPO, agent_specs, detect_agents, install_agent_skills
 
 _AGENT_CHOICES = tuple(agent_specs())
 
@@ -61,7 +54,7 @@ def init_command(
 
     selected_agents = _select_agents(agents, all_agents, assume_yes, skip_skills, json_output)
     result = _empty_result(selected_agents)
-    result["skills"]["skipped"] = skip_skills
+    result["skills"]["skipped"] = skip_skills or not selected_agents
 
     try:
         auth = _ensure_auth(api_key=api_key, skip_auth=skip_auth, browser=browser, json_output=json_output)
@@ -72,22 +65,14 @@ def init_command(
     result["mode"] = "authenticated" if auth["authenticated"] else "keyless"
     result["verification"]["auth"] = auth["authenticated"]
 
-    if not skip_skills:
+    if not result["skills"]["skipped"]:
         try:
             skills_result = install_agent_skills(selected_agents)
             result["skills"].update({
-                "installer": skills_result.installer,
-                "source": SKILLS_REPO if skills_result.installer == "npx" else SKILLS_SOURCE,
                 "installed": skills_result.installed,
                 "updated": skills_result.updated,
-                "unchanged": skills_result.unchanged,
-                "total": skills_result.total,
-                "linked": skills_result.linked,
                 "restart_required": skills_result.restart_required,
             })
-            result["verification"]["skills"] = verify_skills(selected_agents)
-            if not result["verification"]["skills"]:
-                raise RuntimeError("Installed Tavily skills could not be verified.")
         except Exception as exc:
             _fail(result, "skills", str(exc), 1, json_output)
             return
@@ -195,21 +180,16 @@ def _empty_result(agents: tuple[str, ...]) -> dict[str, Any]:
         "mode": "unknown",
         "auth": {"authenticated": False, "method": "none"},
         "skills": {
-            "installer": None,
-            "source": SKILLS_SOURCE,
+            "source": SKILLS_REPO,
             "agents": list(agents),
             "installed": 0,
             "updated": 0,
-            "unchanged": 0,
-            "total": 0,
-            "linked": 0,
             "restart_required": False,
             "skipped": False,
         },
         "verification": {
             "cli": False,
             "auth": False,
-            "skills": None,
             "live_search": False,
         },
     }
@@ -251,11 +231,10 @@ def _print_result(result: dict[str, Any], *, json_output: bool) -> None:
     if skills["skipped"]:
         console.print("    [dim]• Skills skipped[/dim]")
     else:
-        agents = ", ".join(skills["agents"]) or "shared agent directory"
-        console.print(f"    [#9BC0AE]✓[/#9BC0AE] {skills['total']} Tavily skills ready for {agents}")
+        console.print(f"    [#9BC0AE]✓[/#9BC0AE] Tavily skills ready for {', '.join(skills['agents'])}")
     console.print("    [#9BC0AE]✓[/#9BC0AE] Live search verified")
 
-    if skills["restart_required"] and skills["agents"]:
+    if skills["restart_required"]:
         console.print()
         console.print(f"    [dim]Restart {', '.join(skills['agents'])} to load newly installed skills.[/dim]")
 

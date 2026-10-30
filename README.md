@@ -84,13 +84,12 @@ tvly search "latest AI trends"
 `tvly init` guides you through:
 
 1. **Authentication:** reuse an existing credential or sign in through browser OAuth.
-2. **Agent setup:** detect Claude Code, Codex, and Cursor and install Tavily's eight core agent skills.
-3. **Verification:** check the CLI and installed skills, then run a live search.
+2. **Agent setup:** detect Claude Code, Codex, and Cursor and install the Tavily agent skills.
+3. **Verification:** check the CLI, then run a live search.
 
-When Node.js is available, skills are installed with the
-[skills.sh CLI](https://skills.sh) (`npx skills add tavily-ai/skills`). Without
-Node.js, `tvly init` installs the skills pinned to your CLI release instead.
-Restart your agent after new skills are installed.
+Skills are installed with the [skills.sh CLI](https://skills.sh)
+(`npx skills add tavily-ai/skills`), so skill setup requires Node.js. Without
+Node.js, use `--skip-skills`. Restart your agent after new skills are installed.
 
 ```bash
 # Set up one or more supported agents
@@ -112,10 +111,9 @@ tvly init --skip-skills
 
 Skills are installed in `~/.agents/skills`, which Codex and Cursor load
 directly; Claude Code gets links in `~/.claude/skills`. If no supported agent
-is detected, setup still installs the shared skills.
-Rerunning `tvly init` updates existing skills to the latest published version
-(or, without Node.js, to the version pinned by your CLI release). You can also
-run `npx skills update` at any time.
+is detected, setup skips the skills.
+Rerunning `tvly init` updates existing skills to the latest published version.
+You can also run `npx skills update` at any time.
 
 ### Try search and extract without signing in
 
@@ -389,7 +387,7 @@ tvly --status --json   # structured status
 ### `tvly init`
 
 Run first-time setup, install or update the Tavily skills (through
-`npx skills` when Node.js is available), and verify the CLI with a live search.
+`npx skills`, which requires Node.js), and verify the CLI with a live search.
 
 | Option | Description |
 |--------|-------------|
