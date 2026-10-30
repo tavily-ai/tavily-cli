@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 import click
 from tavily import TavilyKeylessLimitError
@@ -13,11 +14,18 @@ from tavily_cli.common import (
     handle_keyless_cap_hit,
     handle_oauth_refresh_error,
     json_option,
+    keyless_cap_error,
+    output_option,
+    print_keyless_cap_hit,
+    resolve_output,
 )
+
+MAX_QUERIES = 5
+DEFAULT_CHARS = 600
 
 
 @click.command()
-@click.argument("query", required=False)
+@click.argument("queries", nargs=-1)
 @click.option("--depth", "search_depth", type=click.Choice(["ultra-fast", "fast", "basic", "advanced"]), default=None, help="Search depth (default: basic).")
 @click.option("--max-results", type=int, default=None, help="Maximum results, 0-20 (default: 5).")
 @click.option("--topic", type=click.Choice(["general", "news", "finance"]), default=None, help="Search topic.")
@@ -32,11 +40,12 @@ from tavily_cli.common import (
 @click.option("--include-images", is_flag=True, default=False, help="Include image results.")
 @click.option("--include-image-descriptions", is_flag=True, default=False, help="Include AI image descriptions.")
 @click.option("--chunks-per-source", type=int, default=None, help="Chunks per source (advanced/fast depth only).")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@output_option
+@click.option("--max-chars", type=click.IntRange(min=0), default=None, help="Characters of each result's content to print (default 600, shared across queries: 300 each for 2, 200 for 3); 0 prints it whole. --json and -o files keep it whole.")
 @client_name_option
 @json_option
 def search(
-    query: str | None,
+    queries: tuple[str, ...],
     search_depth: str | None,
     max_results: int | None,
     topic: str | None,
@@ -52,25 +61,36 @@ def search(
     include_image_descriptions: bool,
     chunks_per_source: int | None,
     output_file: str | None,
+    max_chars: int | None,
     client_name: str | None,
     json_output: bool,
 ) -> None:
     """Search the web using Tavily.
 
-    QUERY is the search query. Use "-" to read from stdin.
+    QUERIES are one or more search queries (up to 5), run in parallel with the same
+    options. Use "-" to read a single query from stdin.
 
     Works without an API key (subject to a rate-limit cap). Run
     `tvly login` to authenticate and remove the cap.
     """
     from tavily_cli.config import get_client_or_keyless
-    from tavily_cli.output import print_search_results
+    from tavily_cli.output import print_multi_search_results, print_search_results
 
-    if query == "-":
-        query = sys.stdin.read(100_000).strip()
-    if not query:
+    if queries == ("-",):
+        queries = (sys.stdin.read(100_000).strip(),)
+    queries = tuple(q for q in queries if q.strip())
+    if not queries:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
+    if len(queries) > MAX_QUERIES:
+        raise click.UsageError(f"At most {MAX_QUERIES} queries per command, got {len(queries)}.")
 
-    kwargs: dict = {"query": query}
+    output_file = resolve_output(output_file, "search", queries[0])
+
+    if max_chars is None:
+        # One search's worth of text per command, however many queries it holds.
+        max_chars = DEFAULT_CHARS // len(queries)
+
+    kwargs: dict = {}
     if search_depth is not None:
         kwargs["search_depth"] = search_depth
     if max_results is not None:
@@ -103,10 +123,38 @@ def search(
     from tavily_cli.oauth import OAuthError
     from tavily_cli.theme import spinner
 
+    if len(queries) > 1:
+        try:
+            client, _is_keyless = get_client_or_keyless(client_name=client_name)
+        except OAuthError as e:
+            handle_oauth_refresh_error(e, json_output)
+        except Exception as e:
+            handle_api_error(e, json_output)
+
+        cap_hits: list[TavilyKeylessLimitError] = []
+
+        def run(q: str) -> dict:
+            try:
+                return client.search(query=q, **kwargs)
+            except TavilyKeylessLimitError as e:  # keep the code, retry delay and next actions
+                cap_hits.append(e)
+                return {"query": q, "error": keyless_cap_error(e)}
+            except Exception as e:  # one failed query must not lose the others' results
+                return {"query": q, "error": str(e)}
+
+        with spinner("Searching...", json_mode=json_output), ThreadPoolExecutor(len(queries)) as pool:
+            responses = list(pool.map(run, queries))
+        print_multi_search_results(responses, json_mode=json_output, output_file=output_file, max_chars=max_chars)
+        if cap_hits and not json_output:
+            print_keyless_cap_hit(cap_hits[0])
+        if all("error" in r for r in responses):
+            raise SystemExit(3 if cap_hits else 4)
+        return
+
     try:
         client, _is_keyless = get_client_or_keyless(client_name=client_name)
         with spinner("Searching...", json_mode=json_output):
-            response = client.search(**kwargs)
+            response = client.search(query=queries[0], **kwargs)
     except TavilyKeylessLimitError as e:
         handle_keyless_cap_hit(e, json_output)
     except OAuthError as e:
@@ -114,4 +162,4 @@ def search(
     except Exception as e:
         handle_api_error(e, json_output)
 
-    print_search_results(response, json_mode=json_output, output_file=output_file)
+    print_search_results(response, json_mode=json_output, output_file=output_file, max_chars=max_chars)

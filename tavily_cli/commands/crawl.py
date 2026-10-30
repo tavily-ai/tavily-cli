@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 import click
 
-from tavily_cli.common import client_name_option, handle_api_error, json_option
+from tavily_cli.common import client_name_option, handle_api_error, json_option, output_option, resolve_output
 
 
 @click.command()
@@ -23,7 +25,7 @@ from tavily_cli.common import client_name_option, handle_api_error, json_option
 @click.option("--allow-external/--no-external", default=None, help="Include external domain links.")
 @click.option("--include-images", is_flag=True, default=False, help="Include images.")
 @click.option("--timeout", type=float, default=None, help="Max wait time in seconds (10-150).")
-@click.option("--output", "-o", "output_file", default=None, help="Save JSON output to file.")
+@output_option
 @click.option("--output-dir", default=None, help="Save each page as a .md file in this directory.")
 @client_name_option
 @json_option
@@ -56,6 +58,8 @@ def crawl(
     """
     from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import print_crawl_results
+
+    output_file = resolve_output(output_file, "crawl", urlparse(url).netloc)
 
     require_api_key_friendly("crawl", json_mode=json_output)
     client = get_client(client_name=client_name, json_mode=json_output)

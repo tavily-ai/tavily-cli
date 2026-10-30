@@ -9,13 +9,12 @@ CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, ex
 
 - **One-Command Setup** — Authenticate, install Tavily skills for supported agents, and verify a live search
 - **Interactive REPL** — Run `tvly` with no arguments for a chat-like shell experience
-- **CLI for Humans & AI Agents** — Rich-formatted output for humans, `--json` for agents
+- **CLI for Humans & AI Agents** — Rich-formatted output in a terminal, plain text when piped or run by an agent, and `--json` for structured output
 - **Web Search** — LLM-optimized search with domain/date filtering and relevance scoring
 - **Content Extraction** — Extract clean markdown from any URL
 - **Website Crawling** — Crawl sites with depth/breadth control and path filtering
 - **URL Discovery** — Map all URLs on a site without content extraction
 - **Deep Research** — AI-powered research with citations and structured output
-- **Feedback** — Score search results and share request or session feedback
 - **Self-Update** — Check for and install CLI updates through the original package manager
 
 ## Installation
@@ -130,8 +129,8 @@ tvly extract https://example.com
 ```
 
 If you reach the cap, the CLI prints continuation options. Run `tvly login`
-to authenticate, then retry your command. `crawl`, `map`, `research`, and
-`feedback` require authentication.
+to authenticate, then retry your command. `crawl`, `map`, and `research`
+require authentication.
 
 ### Manage authentication
 
@@ -197,7 +196,13 @@ tvly search "quantum computing" --depth advanced --max-results 10 --time-range w
 # Search specific domains
 tvly search "SEC filings for Apple" --include-domains sec.gov,reuters.com
 
-# JSON output for agents
+# Several queries at once, run in parallel with the same options
+tvly search "Rust 2024 edition release date" "Rust 1.85 release notes" --depth advanced
+
+# Longer snippets (0 prints each result's content whole)
+tvly search "AI news" --max-chars 1500
+
+# JSON output
 tvly search "AI news" --json
 
 # Set client_name for attribution
@@ -267,28 +272,37 @@ tvly research poll REQUEST_ID --json          # wait and get result
 tvly research "AI market size" --output-schema schema.json --json
 ```
 
-### Submit Feedback
+### Output in Pipes and Agent Shells
 
-Replace `REQUEST_ID`, `SESSION_ID`, and the example result IDs with values
-from your requests.
+When stdout is not a terminal, such as in a pipe, a redirect or a coding agent's
+shell, commands print plain text with no styling or line wrapping:
 
-```bash
-# Score a search request overall and per result
-tvly feedback --request-id REQUEST_ID --agent-score 0.9 \
-  --urls-scores '[{"id": "r1", "agent_score": 0.9}, {"id": "r2", "agent_score": 0.2, "comment": "outdated"}]'
+- `search` prints each result's title, full URL and the first 600 characters of
+  its content on one line. `--max-chars` changes the length, and `0` prints the
+  content whole. Several queries in one command share the 600 characters.
+- `extract` and `crawl` print each page in full, as `# <url>` followed by its
+  content, with links kept.
+- `map` prints one URL per line, and `research` prints the report followed by
+  its sources.
 
-# Feedback on a whole session, with the answer you produced
-tvly feedback --session-id SESSION_ID --agent-score 1 --response-delivered "..." --used-ids '["r1", "r3"]'
-```
+`--json` output is unchanged.
 
 ### Save Results
 
 `--output` writes the structured JSON response, regardless of the filename
-extension. For extraction, `--format markdown` controls the content inside
-that response; it does not turn the output file into plain Markdown.
+extension, and creates the folder if it doesn't exist. With no value, `-o`
+saves under `.tavily/` with a generated name, such as
+`.tavily/search-ai-news-142310-3f9a1c.json`, and prints the path. A new `.tavily/`
+folder gets its own `.gitignore`, so saved results stay out of git. Nothing is
+saved without `-o`. When stdout is not
+a terminal, `search --output` still prints the results, so you can skim them and
+read the saved file for more. For extraction, `--format markdown` controls the
+content inside that response; it does not turn the output file into plain
+Markdown.
 
 ```bash
-tvly search "AI news" --output results.json
+tvly search "AI news" -o
+tvly search "AI news" --output results/ai-news.json
 tvly extract https://example.com --format markdown --output extracted.json
 
 # Save individual crawled pages as Markdown files
@@ -315,7 +329,6 @@ tvly
 │   ├── run <query>             # Start a research task (same as above)
 │   ├── status <id>             # Check task status
 │   └── poll <id>               # Poll until completion
-└── feedback                    # Submit feedback on a request or session
 ```
 
 ## Non-Interactive Mode (for AI Agents & Scripts)
@@ -411,8 +424,14 @@ skip authentication.
 | `--include-images` | Include image results |
 | `--include-image-descriptions` | Include AI image descriptions |
 | `--chunks-per-source` | Chunks per source (advanced/fast depth only) |
-| `-o` / `--output` | Save output to file |
+| `--max-chars` | Characters of each result's content to print (default 600, shared across queries; `0` for all) |
+| `-o` / `--output` | Save the full JSON response to file; with no value, under `.tavily/` |
 | `--client-name` | Set optional `client_name` for request attribution |
+
+`tvly search` accepts up to 5 queries and runs them in parallel with the same
+options. Each query's results print under its own `=== [i/n] <query>` header;
+with `--json`, the output is a list of responses in query order. A query that
+fails reports its error without stopping the others.
 
 ### `tvly update`
 
@@ -502,25 +521,6 @@ Check research task status by request ID. Supports `--client-name`.
 ### `tvly research poll`
 
 Poll until completion and return results. Same `--poll-interval`, `--timeout`, `-o`, and `--client-name` options as `run`.
-
-### `tvly feedback`
-
-Requires `--session-id` or `--request-id`. Requires a Tavily API key.
-
-| Option | Description |
-|--------|-------------|
-| `--session-id` | Session to give feedback on |
-| `--request-id` | Search request to give feedback on |
-| `--agent-score` | Overall score: 1 perfect, 0 irrelevant, -1 harmful |
-| `--human-score` | End-user feedback, if available (e.g. like/dislike) |
-| `--comment` | Explanation, required when `--agent-score` is below 0.5 |
-| `--response-delivered` | The final answer you produced using the results |
-| `--used-urls` | URLs you actually used: JSON array of strings, inline or a file path |
-| `--used-ids` | Result IDs you actually used: JSON array of strings, inline or a file path |
-| `--used-citations` | Content snippets you used: JSON array of strings, inline or a file path |
-| `--urls-scores` | Per-result feedback: JSON array of `{id\|url, agent_score, scores, comment}`, inline or a file path |
-| `--extra-scores` | Additional labeled scores: JSON array of `{label, value}`, inline or a file path |
-| `--client-name` | Set optional `client_name` for request attribution |
 
 ### `tvly set-default` / `tvly unset-default`
 

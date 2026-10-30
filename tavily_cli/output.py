@@ -1,5 +1,10 @@
 """Output formatting: Rich for humans, JSON for agents, -o for file output.
 
+When stdout is not a terminal (a pipe, a file, or an agent's shell), the
+printers write plain text instead, with no styling, wrapping or Markdown
+re-rendering: full URLs, search snippets of ``--max-chars``, and extracted pages
+in full.
+
 All human-readable rendering treats result fields (titles, URLs, snippets,
 answers, page content, source lists, error text) as untrusted: they originate
 from the web, the Tavily API, or an MCP response. Rich does not strip raw
@@ -11,6 +16,8 @@ and rendered via ``Text``/validated links rather than markup-bearing f-strings.
 from __future__ import annotations
 
 import json
+import os
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -31,6 +38,27 @@ err_console = Console(stderr=True)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_BLANK_RUNS = re.compile(r"(?:[ \t]*\n){3,}")
+
+
+def _plain(value: Any) -> str:
+    """Untrusted text for non-terminal output: control bytes stripped, runs of blank lines collapsed."""
+    return _BLANK_RUNS.sub("\n\n", sanitize_control(value)).strip()
+
+
+def _snippet(content: Any, max_chars: int) -> str:
+    """A result's content on one line, cut to ``max_chars`` (0 keeps it whole)."""
+    text = " ".join(sanitize_control(content).split())
+    return text[:max_chars] + "..." if max_chars and len(text) > max_chars else text
+
+
+def _echo_pages(pages: list[dict]) -> None:
+    """Write each page as ``# <url>`` followed by its full content, as ``crawl --output-dir`` saves them."""
+    for r in pages:
+        click.echo(f"# {_plain(r.get('url', ''))}\n")
+        click.echo(_plain(r.get("raw_content") or "(no content)") + "\n")
+
 
 def _safe_text(value: Any, *, style: str = "") -> Text:
     """Build a Rich Text from untrusted content.
@@ -101,6 +129,13 @@ def emit(data: Any, *, json_mode: bool, output_file: str | None = None, pretty: 
     """
     text = json.dumps(data, indent=2 if pretty else None, ensure_ascii=False)
     if output_file:
+        folder = os.path.dirname(output_file)
+        if folder and not os.path.isdir(folder):
+            os.makedirs(folder)
+            if os.path.basename(os.path.normpath(folder)) == ".tavily":
+                # Saved results are scratch data; keep the folder out of git without editing the user's .gitignore.
+                with open(os.path.join(folder, ".gitignore"), "w", encoding="utf-8") as g:
+                    g.write("*\n")
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(text + "\n")
         err_console.print(f"Output saved to {output_file}")
@@ -112,18 +147,38 @@ def emit(data: Any, *, json_mode: bool, output_file: str | None = None, pretty: 
 # Search
 # ---------------------------------------------------------------------------
 
-def print_search_results(data: dict, *, json_mode: bool, output_file: str | None = None) -> None:
+def print_search_results(
+    data: dict, *, json_mode: bool, output_file: str | None = None, max_chars: int = 600
+) -> None:
     if json_mode:
         emit(data, json_mode=True, output_file=output_file, pretty=True)
         return
 
     if output_file:
         emit(data, json_mode=True, output_file=output_file, pretty=True)
-        return
+        # At a terminal -o only saves; elsewhere the snippets are printed too, so an agent can skim them and read
+        # the saved file for the results worth more.
+        if console.is_terminal:
+            return
 
     results = data.get("results", [])
     answer = data.get("answer")
     response_time = data.get("response_time")
+
+    if not console.is_terminal:
+        if answer:
+            click.echo(f"Answer: {_plain(answer)}\n")
+        for i, r in enumerate(results, 1):
+            click.echo(f"{i}. {_plain(r.get('title') or 'Untitled')}")
+            click.echo(_plain(r.get("url", "")))
+            if r.get("content"):
+                click.echo(_snippet(r["content"], max_chars))
+            click.echo()
+        if not results:
+            click.echo("No results found.")
+        for img in data.get("images") or []:
+            click.echo(f"Image: {_plain(img.get('url', img) if isinstance(img, dict) else img)}")
+        return
 
     if answer:
         console.print()
@@ -150,15 +205,12 @@ def print_search_results(data: dict, *, json_mode: bool, output_file: str | None
         console.print(header)
 
         domain_line = Text("   ")
-        domain_line.append_text(_safe_link(url, _domain(url), style="#FAA2FB"))
-        console.print(domain_line)
+        domain_line.append_text(_safe_link(url, style="#FAA2FB"))
+        console.print(domain_line, soft_wrap=True)
 
         if content:
-            snippet = content[:300]
-            if len(content) > 300:
-                snippet += "..."
             snippet_line = Text("   ")
-            snippet_line.append(sanitize_control(snippet), style="dim")
+            snippet_line.append(_snippet(content, max_chars), style="dim")
             console.print(snippet_line)
         console.print()
 
@@ -175,6 +227,28 @@ def print_search_results(data: dict, *, json_mode: bool, output_file: str | None
                 console.print(_safe_text(f"  {img}"))
 
 
+def print_multi_search_results(
+    responses: list[dict], *, json_mode: bool, output_file: str | None = None, max_chars: int = 600
+) -> None:
+    """Several searches from one command, in query order. A failed query carries an ``error`` in place of results."""
+    if json_mode or output_file:
+        emit(responses, json_mode=True, output_file=output_file, pretty=True)
+        if json_mode or console.is_terminal:
+            return
+
+    for i, r in enumerate(responses, 1):
+        header = f"=== [{i}/{len(responses)}] {_plain(r.get('query', ''))}"
+        if console.is_terminal:
+            console.print(_safe_text(header, style="bold"))
+        else:
+            click.echo(header)
+        if "error" in r:
+            error = r["error"]
+            click.echo(f"error: {_plain(error['message'] if isinstance(error, dict) else error)}\n")
+        else:
+            print_search_results(r, json_mode=False, max_chars=max_chars)
+
+
 # ---------------------------------------------------------------------------
 # Extract
 # ---------------------------------------------------------------------------
@@ -186,6 +260,12 @@ def print_extract_results(data: dict, *, json_mode: bool, output_file: str | Non
 
     results = data.get("results", [])
     failed = data.get("failed_results", [])
+
+    if not console.is_terminal:
+        _echo_pages(results)
+        for f_item in failed:
+            click.echo(f"Failed: {_plain(f_item.get('url'))}: {_plain(f_item.get('error'))}")
+        return
 
     for r in results:
         url = r.get("url", "")
@@ -239,6 +319,10 @@ def print_crawl_results(
 
     results = data.get("results", [])
     base_url = data.get("base_url", "")
+
+    if not console.is_terminal:
+        _echo_pages(results)
+        return
 
     tree = Tree(_safe_text(base_url, style="bold"))
 
@@ -309,6 +393,11 @@ def print_map_results(data: dict, *, json_mode: bool, output_file: str | None = 
     results = data.get("results", [])
     base_url = data.get("base_url", "")
 
+    if not console.is_terminal:
+        for url in results:
+            click.echo(_plain(url))
+        return
+
     tree = Tree(_safe_text(base_url, style="bold"))
     for url in results:
         tree.add(_safe_link(url))
@@ -317,22 +406,6 @@ def print_map_results(data: dict, *, json_mode: bool, output_file: str | None = 
 
     response_time = data.get("response_time")
     _footer("Map", len(results), "URLs", response_time)
-
-
-# ---------------------------------------------------------------------------
-# Feedback
-# ---------------------------------------------------------------------------
-
-def print_feedback_result(data: dict, *, json_mode: bool) -> None:
-    if json_mode:
-        emit(data, json_mode=True, pretty=True)
-        return
-
-    feedback_id = data.get("feedback_id", "")
-    console.print("  [#9BC0AE]>[/#9BC0AE] Feedback submitted", _safe_text(f" (feedback_id: {feedback_id})", style="dim"))
-
-    response_time = data.get("response_time")
-    _footer("Feedback", 1, "submitted", response_time)
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +431,15 @@ def print_research_result(data: dict, *, json_mode: bool, output_file: str | Non
             error_line.append("Error: ", style="#FAA2FB")
             error_line.append(sanitize_control(data["error"]))
             console.print(error_line)
+        return
+
+    if not console.is_terminal:
+        if content:
+            click.echo(_plain(content) + "\n")
+        if sources:
+            click.echo("Sources:")
+            for i, s in enumerate(sources, 1):
+                click.echo(f"{i}. {_plain(s.get('title', ''))} {_plain(s.get('url', ''))}")
         return
 
     # Render the research report as markdown

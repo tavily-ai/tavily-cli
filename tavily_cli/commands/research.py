@@ -9,7 +9,7 @@ import time
 import click
 from rich.markup import escape
 
-from tavily_cli.common import client_name_option, handle_api_error, sanitize_control
+from tavily_cli.common import client_name_option, handle_api_error, output_option, resolve_output, sanitize_control
 
 
 class ResearchGroup(click.Group):
@@ -126,7 +126,7 @@ def _render_stream(stream_resp, *, output_file: str | None = None) -> None:
 @click.option("--stream", is_flag=True, default=False, help="Stream results in real-time.")
 @click.option("--output-schema", default=None, help="Path to JSON schema file for structured output.")
 @click.option("--citation-format", type=click.Choice(["numbered", "mla", "apa", "chicago"]), default=None, help="Citation format.")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@output_option
 @click.option("--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
 @click.option("--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
 @click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
@@ -163,6 +163,7 @@ def run(
         query = sys.stdin.read(100_000).strip()
     if not query:
         raise click.UsageError("QUERY is required. Pass a query string or use '-' to read from stdin.")
+    output_file = resolve_output(output_file, "research", query)
 
     require_api_key_friendly("research", json_mode=json_mode)
     client = get_client(client_name=client_name, json_mode=json_mode)
@@ -309,7 +310,7 @@ def status(ctx: click.Context, request_id: str, json_flag: bool, client_name: st
 @click.argument("request_id")
 @click.option("--poll-interval", type=int, default=10, help="Seconds between status checks (default: 10).")
 @click.option("--timeout", type=int, default=600, help="Max seconds to wait (default: 600).")
-@click.option("--output", "-o", "output_file", default=None, help="Save output to file.")
+@output_option
 @click.option("--json", "json_flag", is_flag=True, default=False, help="Output as JSON.")
 @client_name_option
 @click.pass_context
@@ -323,6 +324,7 @@ def poll(
     client_name: str | None,
 ) -> None:
     """Poll a research task until completion and return results."""
+    output_file = resolve_output(output_file, "research", request_id)
     from tavily_cli.config import get_client, require_api_key_friendly
     from tavily_cli.output import emit, print_research_result
     from tavily_cli.theme import err_console
