@@ -9,11 +9,55 @@ exactly like the bash scripts in skills/ do.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import httpx
 
 MCP_URL = "https://mcp.tavily.com/mcp"
+
+# The remote reports an argument the tool does not declare as a pydantic
+# validation error whose body names the offending key on its own line.
+_UNEXPECTED_KWARG_RE = re.compile(
+    r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)\n\s+Unexpected keyword argument",
+    re.MULTILINE,
+)
+
+
+def _unsupported_argument_error(tool_name: str, message: str) -> Exception | None:
+    """Translate a remote argument rejection into actionable CLI guidance.
+
+    OAuth credentials are routed through the MCP endpoint, whose tools accept a
+    narrower argument set than the API-key SDK the CLI flags are modelled on.
+    The remote reports the mismatch as a pydantic validation error prefixed with
+    "Internal error", which reads as a server fault rather than the client-side
+    surface mismatch it is. Name the flags and the API-key route instead.
+    """
+    names = _UNEXPECTED_KWARG_RE.findall(message)
+    if not names:
+        return None
+
+    from tavily_cli.common import TavilyAPIError
+
+    flags = ", ".join(f"--{name.replace('_', '-')}" for name in names)
+    if len(names) > 1:
+        subject, arguments, flag_word = "are", "these arguments", "flags"
+    else:
+        subject, arguments, flag_word = "is", "this argument", "flag"
+    return TavilyAPIError(
+        f"{flags} {subject} not supported with browser (OAuth) authentication: "
+        f"the MCP endpoint's {tool_name} tool does not accept {arguments}. "
+        f"Re-run with an API key (tvly login --api-key tvly-...) or drop the {flag_word}."
+    )
+
+
+def _raise_jsonrpc_error(tool_name: str, error: Any) -> None:
+    """Raise the best available exception for a JSON-RPC error object."""
+    message = error.get("message", str(error)) if isinstance(error, dict) else str(error)
+    unsupported = _unsupported_argument_error(tool_name, message)
+    if unsupported is not None:
+        raise unsupported
+    raise RuntimeError(message)
 
 
 def _raise_if_api_error(parsed: dict) -> None:
@@ -80,7 +124,7 @@ def _call_mcp_tool(
         if line.startswith("data:"):
             data = json.loads(line[5:])
             if "error" in data:
-                raise RuntimeError(data["error"].get("message", str(data["error"])))
+                _raise_jsonrpc_error(tool_name, data["error"])
             result = data.get("result", {})
             # MCP wraps the response in structuredContent or content[0].text
             structured = result.get("structuredContent")
@@ -103,7 +147,7 @@ def _call_mcp_tool(
     try:
         data = json.loads(text)
         if "error" in data:
-            raise RuntimeError(data["error"].get("message", str(data["error"])))
+            _raise_jsonrpc_error(tool_name, data["error"])
         return data.get("result", data)
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Unexpected MCP response: {text[:500]}") from e
