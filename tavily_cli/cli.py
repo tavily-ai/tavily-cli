@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import click
 
 from tavily_cli import __version__
@@ -172,7 +174,24 @@ cli.add_command(set_default)
 cli.add_command(unset_default)
 
 
+def _use_utf8_stdio() -> None:
+    """Write stdout/stderr as UTF-8 whatever the console code page is.
+
+    On Windows the standard streams default to the locale encoding (e.g. GBK on
+    Chinese Windows), which cannot encode most of the text Tavily returns, so
+    printing a result raised UnicodeEncodeError and lost the whole response.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None or (stream.encoding or "").lower().replace("-", "") == "utf8":
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass  # not a TextIOWrapper (e.g. replaced in tests), leave it alone
+
+
 def main() -> None:
+    _use_utf8_stdio()
     cli()
 
 
