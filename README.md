@@ -1,5 +1,11 @@
 # Tavily CLI
 
+> **Deprecated.** The Tavily CLI now lives on npm as [`@tavily/cli`](https://www.npmjs.com/package/@tavily/cli),
+> with source at [tavily-ai/cli](https://github.com/tavily-ai/cli). This Python package receives no further
+> updates. Install the current CLI with `npx @tavily/cli init`, then remove this one with
+> `uv tool uninstall tavily-cli` or `pip uninstall tavily-cli`. Every `tvly` command in this package
+> prints a one-line reminder on stderr; nothing else changed in this release.
+
 CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, extract, crawl, map, and research from the command line.
 
 > **Note:** This package provides the `tvly` command-line tool. It depends on

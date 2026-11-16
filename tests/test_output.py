@@ -97,7 +97,7 @@ def test_multi_query_runs_each_with_shared_options(fake_client):
     assert result.exit_code == 0, result.output
     assert sorted(q for q, _ in fake_client.calls) == ["one", "two"]
     assert all(kw["search_depth"] == "advanced" for _, kw in fake_client.calls)
-    lines = result.output.splitlines()
+    lines = result.stdout.splitlines()
     assert lines[0] == "=== [1/2] one" and lines[1] == "1. T one" and "=== [2/2] two" in lines
 
 
@@ -112,7 +112,7 @@ def test_multi_query_keeps_keyless_cap_details(fake_client, monkeypatch):
 
     monkeypatch.setattr(fake_client, "search", search)
     result = CliRunner().invoke(cli, ["search", "ok", "capped", "--json"])
-    error = json.loads(result.output)[1]["error"]
+    error = json.loads(result.stdout)[1]["error"]
     assert error["code"] == "keyless_cap" and error["retry_after_seconds"] == 60 and error["next_actions"]
     result = CliRunner().invoke(cli, ["search", "capped", "capped"])
     assert result.exit_code == 3 and "tvly login" in result.output

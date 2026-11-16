@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tavily-cli"
-version = "0.2.1"
-description = "CLI and agent tools for the Tavily API — search, extract, crawl, map, and research from the command line."
+version = "0.2.2"
+description = "Deprecated: the Tavily CLI moved to npm as @tavily/cli. This package is no longer updated."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["ai", "tavily", "web-search", "llm", "rag", "agents", "research", "crawl", "extract"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 7 - Inactive",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",

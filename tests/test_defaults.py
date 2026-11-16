@@ -28,7 +28,7 @@ def test_set_default_creates_both_files(homes: tuple[Path, Path]) -> None:
     assert result.exit_code == 0, result.output
     assert json.loads(claude.read_text()) == {"permissions": {"deny": ["WebSearch", "WebFetch"]}}
     assert codex.read_text() == 'web_search = "disabled"\n'
-    assert all(r["changed"] for r in json.loads(result.output)["results"])
+    assert all(r["changed"] for r in json.loads(result.stdout)["results"])
 
 
 def test_claude_round_trip_preserves_existing_settings(homes: tuple[Path, Path]) -> None:
@@ -132,7 +132,7 @@ def test_project_scope_writes_to_cwd(
     assert codex.read_text() == 'web_search = "disabled"\n'
     assert not global_claude.exists()
     assert not global_codex.exists()
-    assert {r["scope"] for r in json.loads(result.output)["results"]} == {"project"}
+    assert {r["scope"] for r in json.loads(result.stdout)["results"]} == {"project"}
 
     result = CliRunner().invoke(cli, ["unset-default", "--claude", "--codex", "--project"])
 
