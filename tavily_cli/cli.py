@@ -15,6 +15,13 @@ from tavily_cli.commands.research import research
 from tavily_cli.commands.search import search
 from tavily_cli.commands.update import update_command
 
+# The CLI moved to npm as @tavily/cli; this package is kept only so pinned installs keep working.
+DEPRECATION_NOTICE = (
+    "tavily-cli on PyPI is deprecated and no longer updated. "
+    "Switch to the npm CLI: npx @tavily/cli init "
+    "(then: uv tool uninstall tavily-cli, or pip uninstall tavily-cli)"
+)
+
 
 @click.group(invoke_without_command=True)
 @click.option("--version", is_flag=True, default=False, help="Show version and exit.")
@@ -34,6 +41,7 @@ def cli(ctx: click.Context, version: bool, show_status: bool, json_output: bool)
     """
     ctx.ensure_object(dict)
     ctx.obj["json_output"] = json_output
+    click.echo(DEPRECATION_NOTICE, err=True)
 
     if version:
         if json_output:

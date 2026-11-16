@@ -12,6 +12,16 @@ from tavily_cli import repl
 from tavily_cli.cli import cli
 
 
+def test_every_run_prints_the_deprecation_notice_on_stderr_only() -> None:
+    result = CliRunner().invoke(cli, ["--version", "--json"])
+
+    assert result.exit_code == 0
+    assert "deprecated" in result.stderr
+    assert "npx @tavily/cli init" in result.stderr
+    assert result.stdout.startswith("{")
+    assert "deprecated" not in result.stdout
+
+
 def test_cli_help_promotes_guided_setup_and_browser_login() -> None:
     result = CliRunner().invoke(cli, ["--help"])
 
